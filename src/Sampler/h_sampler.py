@@ -1,6 +1,10 @@
 """
     Hierarchical Samplers
 
+    NOTE: all samplers designs with timeseries in mind
+    --> return shape = N x M x Twin
+    Twin = timewindow
+
     # TODO: better design
     # Wut's the design?
     # > Builder
@@ -11,13 +15,13 @@
     # > > houses data and indices into array
     # > > keeps track of exhausted
 """
-from typing import Dict
+from typing import Dict, List
 import numpy as np
 import numpy.random as npr
 import sampler_iface
 
 
-class SmallHSampler(sampler_iface.Sampler):
+class SmallSampler(sampler_iface.Sampler):
     """Small Hierarchical sampler
     Small size --> store the whole dataset in memory"""
 
@@ -25,8 +29,8 @@ class SmallHSampler(sampler_iface.Sampler):
         """Initialize HSampler
 
         Args:
-            data (np.ndarray): N x M array of data
-            indices (np.ndarray): len N array of ptrs
+            data (np.ndarray): N x ... array of data
+            indices (np.ndarray): array of ptrs to data (< len N)
                 to data
         """
         self.data = data
@@ -48,9 +52,75 @@ class SmallHSampler(sampler_iface.Sampler):
         self.next_sample = 0
 
     def pull_samples(self, num_samples: int):
+        """Pull next num_samples samples
+
+        Args:
+            num_samples (int):
+
+        Returns:
+            np.ndarray: next set of data ...
+        """
         sel_inds = self.set_indices[self.next_sample:self.next_sample+num_samples]
         self.next_sample += num_samples
         return self.data[sel_inds]
+
+    def get_data_shape(self):
+        return np.shape(self.data)
+
+
+# TODO: factory interface!
+class SSFactoryEvenSplit:
+    """Factory that builds Small Samplers
+        by splitting data evenly in half
+    Typical use case:
+    > Call this factory each time you want a different split
+
+    Key: set_indices are not in timewindow format
+    --> factory will generate timewindows
+    set_bools = booleans ~ True when data is available to this set
+    """
+
+    def __init__(self,
+                 data: List[np.ndarray],
+                 set_bools: List[np.ndarray],
+                 twindow_size: int):
+        self.data = data
+        self.set_bools = set_bools
+        self.twindow_size = twindow_size
+
+    def _find_legal_windows(self, avail_booli: np.ndarray):
+        """Find legal windows ~ entire window is available in booli (from set_bools)
+
+        Args:
+            avail_booli (np.ndarray): boolean availability array for one data subset
+        
+        Returns:
+            List[int]: legal window starts
+        """
+        legal_starts = []
+        for i in range(0, len(avail_booli), self.twindow_size):
+            if np.sum(avail_booli[i:i+self.twindow_size]) < 0.5:
+                legal_starts.append(i)
+        return legal_starts
+
+    def generate_split(self, rand_seed: int):
+        """Generate 50/50 split of available indices
+        using provided random seed
+
+        Args:
+            rand_seed (int): random seed for rng
+        """
+        rng_gen = npr.default_rng(rand_seed)
+        for i in range(len(self.data)):
+            # pull a starting point
+            rt0 = rng_gen.integers(0, twindow_size, 1)[0]
+            # find all legal windows:
+            legal_starts_off = self._find_legal_windows(self.set_bools[i][rt0:])
+            legal_starts = legal_starts_off + rt0
+            # split legal windows across the 2 sets:
+            # TODO: finish this!
+
+
 
 
 def build_from_wormwindows(npz_dat: Dict,
