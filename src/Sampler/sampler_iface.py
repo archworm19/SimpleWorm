@@ -5,12 +5,13 @@ import abc
 
 class Sampler(abc.ABC):
 
-    def set_new_epoch(self):
+    def pull_samples(self, num_samples: int):
         pass
 
-    def pull_train_samples(self, num_samples: int):
+    def epoch_reset(self):
         pass
 
-    def pull_test_samples(self, num_samples: int):
+    def shuffle(self, rng_seed: int = 42):
         pass
+
 

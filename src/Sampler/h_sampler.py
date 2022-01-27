@@ -1,5 +1,15 @@
 """
     Hierarchical Samplers
+
+    # TODO: better design
+    # Wut's the design?
+    # > Builder
+    # > > Generate sets from hierarchical data
+    # > > > Sets = indices into data numpy array
+    # > Sampler
+    # > > one sampler for each set
+    # > > houses data and indices into array
+    # > > keeps track of exhausted
 """
 from typing import Dict
 import numpy as np
@@ -7,77 +17,40 @@ import numpy.random as npr
 import sampler_iface
 
 
-class HTreeNode:
-    """HTreeNode
-    Either points to other HTreeNodes or to ndarray
-    """
-
-    def __init__(self):
-        self.children = {}
-        self.leaf = []
-    
-    def get_child(self, group_name: str):
-        return self.children.get(group_name, None)
-    
-    def insert_child(self, group_name: str, node):
-        self.children[group_name] = node
-    
-    def update_leaf(self, leaf: np.ndarray):
-        """Assumes flat array
-
-        Args:
-            leaf (np.ndarray): [description]
-        """
-        self.leaf = np.hstack((self.leaf, leaf))
-
-
-class HTree:
-
-    def __init__(self):
-        self.root = HTreeNode()
-
-    def add_group(self,
-                  group_names: List,
-                  leaf: np.ndarray):
-        cnode = self.root
-        for g in group_names:
-            new_node = cnode.get_child(g)
-            if new_node is None:
-                new_node = HTreeNode()
-                cnode.insert_child(new_node)
-            cnode = new_node
-        cnode.update_leaf(leaf)
-    
-
-# TODO: why is this design bad?
-# > Train / Test are NOT static
-# ... that's the point of sampling
-# Better design?
-# > all possible window starts are the leaves
-# How do you keep track of who is next?
-# > 
-
-
 class SmallHSampler(sampler_iface.Sampler):
     """Small Hierarchical sampler
     Small size --> store the whole dataset in memory"""
 
-    # TODO: generic way to represent group hierarchy?
-    # 
-    def __init__(self, data: np.ndarray, sample_tree: HTree):
+    def __init__(self, data: np.ndarray, set_indices: np.ndarray):
         """Initialize HSampler
 
         Args:
             data (np.ndarray): N x M array of data
+            indices (np.ndarray): len N array of ptrs
+                to data
         """
         self.data = data
-        self.sample_tree = sample_tree
+        self.set_indices = set_indices
+        self.next_sample = 0
 
-    def set_new_epoch(self):
-        
+    def shuffle(self, rng_seed: int = 42):
+        """Shuffle 
 
-    def pull_train_samples(self, num_samples: int):
+        Args:
+            rng_seed (int): [description]. Defaults to 42.
+        """
+        dr = npr.default_rng(rng_seed)
+        dr.shuffle(self.set_indices)
 
+    def epoch_reset(self):
+        """Restart sampling for new epoch
+        """
+        self.next_sample = 0
+
+    def pull_samples(self, num_samples: int):
+        sel_inds = self.set_indices[self.next_sample:self.next_sample+num_samples]
+        self.next_sample += num_samples
+        return self.data[sel_inds]
 
 
 def build_from_wormwindows(npz_dat: Dict,
@@ -94,19 +67,24 @@ def build_from_wormwindows(npz_dat: Dict,
     Size assumption: small ~ no need for memory mapping
     
     Procedure:
-    > Break up into train - test sets according
-    to file > timewindow hierarchy
+    > Breaks up into non-overalapping time windows
+
+    Note: for out-of-bootstrapping --> call this func
+        for each out-of-boot sample
 
     Args:
         npz_dat (Dict): Dict where values are
             numpy arrays
+    
+    Returns:
+        SmallHSampler: Training set
+        SmallHSampler: Test Set
         
     """
-    htree = HTree()
     # seeding random number generator makes 
     # process deterministic
     rng_gen = npr.default_rng(rand_seed)
-    full_dat = []
+    full_dat, train_inds, test_inds = [], [], []
     # iter thru files ~ top-level
     kz = list(npz_dat.keys())
     offset = 0
@@ -115,17 +93,19 @@ def build_from_wormwindows(npz_dat: Dict,
         rt0 = rng_gen.integers(0, twindow_size, 1)[0]
         # update groups:
         dat_i = npz_dat[k]
-        train_inds, test_inds = [], []
+        ctrain_inds, ctest_inds = [], []
         for j in range(rt0, len(dat_i), twindow_size):
             if rng_gen.random() < train_percentage:
-                train_inds.extend([offset + z for z in range(j, j+twindow_size)])
+                ctrain_inds.extend([offset + z for z in range(j, j+twindow_size)])
             else:
-                test_inds.extend([offset + z for z in range(j, j+twindow_size)])
-        # insert groups into the tree
-        htree.add_group([k, 'train'], train_inds)
-        htree.add_group([k, 'test'], test_inds)
-
+                ctest_inds.extend([offset + z for z in range(j, j+twindow_size)])
+        # save train/test
+        train_inds.append(ctrain_inds)
+        test_inds.append(ctest_inds)
         # save data:
         full_dat.append(npz_dat[k])
         # update offset for set completion:
         offset += np.shape(npz_dat[k])[0]
+    Tr = SmallHSampler(np.vstack(full_dat), np.hstack(train_inds))
+    Te = SmallHSampler(np.vstack(full_dat), np.hstack(test_inds))
+    return Tr, Te
