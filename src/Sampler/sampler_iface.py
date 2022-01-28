@@ -14,7 +14,7 @@ class Sampler(abc.ABC):
     def shuffle(self, rng_seed: int = 42):
         pass
 
-    def get_data_shape(self):
+    def get_sample_size(self):
         pass
 
 
