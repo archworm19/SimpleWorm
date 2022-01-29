@@ -89,6 +89,45 @@ class SmallSampler(sampler_iface.Sampler):
         self.next_sample += num_samples
         return np.array(batch), np.array(ident_batch)
 
+    # TODO: mappings; flattening and unflattening
+
+    def flatten_samples(self,
+                        dat_tseries: np.ndarray,
+                        dat_ids: np.ndarray):
+        """flatten samples
+        Takes in structured timeseries and identity data
+        --> flattens it to N x M array
+
+        Args:
+            dat_tseries (np.ndarray): num_samples x T x ... array
+            dat_ids (np.ndarray):
+        """
+        sample_size = np.shape(dat_tseries)[0]
+        return np.hstack((np.reshape(dat_tseries, (sample_size, -1)),
+                          dat_ids))
+    
+    def unflatten_samples(self, dat_flat: np.ndarray):
+        """Reshape flatten data back to original shape
+        Inverse operation of flatten_sampels
+
+        Args:
+            dat_flat (np.ndarray): N x M array
+                where N = number of samples
+        
+        Returns:
+            np.ndarray: time series data in original
+                data shape
+            np.ndarray: id data in original data shape
+        """
+        # first: break up between tseries and ids:
+        t_shape = [self.window_size] + np.shape(self.data[0])[1:]
+        num_dim_t = int(np.prod(t_shape))
+        t_dat = dat_flat[:, :num_dim_t]
+        id_dat = dat_flat[:, num_dim_t:]
+        # reshape time series data to get back to og size
+        re_t_dat = np.reshape(t_dat, t_shape)
+        return re_t_dat, id_dat
+
     def get_sample_size(self):
         return len(self.window_starts)
 
