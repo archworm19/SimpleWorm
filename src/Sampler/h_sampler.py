@@ -143,12 +143,10 @@ class SSFactoryEvenSplit:
         full_dat, train_wins, test_wins, full_id_dat = [], [], [], []
         offset = 0
         for i in range(len(self.data)):
-            # pull a starting point
-            rt0 = rng_gen.integers(0, self.twindow_size, 1)[0]
             # find all legal windows:
-            legal_starts_off = self._find_legal_windows(self.set_bools[i][rt0:])
+            legal_starts_off = self._find_legal_windows(self.set_bools[i])
             # NOTE: VERY IMPORTANT: offset and random start added in here
-            legal_starts = np.array(legal_starts_off) + rt0 + offset
+            legal_starts = np.array(legal_starts_off) + offset
             # split legal windows across the 2 sets:
             tr_assign = rng_gen.random(len(legal_starts)) < self.tr_prob
             subtr_t0s, subtest_t0s = [], []
@@ -195,7 +193,6 @@ def _assert_dim_match(dat: List[np.ndarray]):
 
 def build_small_factory(dat: List[np.ndarray],
                         twindow_size: int,
-                        block_size: int,
                         rand_seed: int = 42):
     """Build a Small Factory
 
@@ -217,9 +214,6 @@ def build_small_factory(dat: List[np.ndarray],
             assumed to be timeseries with time along axis 0
         twindow_size (int): sampling window size
             = Time window size models will act on
-        block_size (int): number of contiguous twindows that
-            go into training vs. test. This does not
-            affect model windows.
         rand_seed (int): rng seed for train vs. test splitting
 
     Returns:
@@ -236,23 +230,21 @@ def build_small_factory(dat: List[np.ndarray],
     # process deterministic
     rng_gen = npr.default_rng(rand_seed)
 
-    # tbwin = timewindow size * block size
-    # central time unit for train vs. test split
-    tbwin = twindow_size * block_size
-
     train_bools, test_bools = [], []
     ident_dat = []
     # iter thru files ~ top-level
     for i in range(len(dat)):
+        # pull rt0 here ~ random offsets
+        rt0 = rng_gen.integers(twindow_size)
         boolz = np.ones((len(dat[i]))) < 0  # false by default
-        for j in range(0, len(dat[i]), tbwin):
+        for j in range(rt0, len(dat[i]), twindow_size):
             if rng_gen.random() < .667:
-                boolz[j:j+tbwin] = True
+                boolz[j:j+twindow_size] = True
         train_bools.append(boolz)
         test_bools.append(np.logical_not(boolz))
         # identity data:
         wid = i * np.ones((len(boolz)))
-        trang = np.arange(len(boolz)) / max_dlen
+        trang = (rt0 + np.arange(len(boolz))) / max_dlen
         ident_dat.append(np.vstack((wid, trang)).T)
     TrainFactory = SSFactoryEvenSplit(dat, ident_dat, train_bools, twindow_size, 0.5)
     TestFactory = SSFactoryEvenSplit(dat, ident_dat, test_bools, twindow_size, 1.0)
@@ -285,11 +277,12 @@ if __name__ == "__main__":
     # test samplers with fake data
     d1 = 1 * np.ones((300, 3))
     d2 = 2 * np.ones((400, 3))
-    train_factory, test_sampler = build_small_factory([d1, d2], 6, 4, 42)
+    train_factory, test_sampler = build_small_factory([d1, d2], 6, 42)
     train_sampler, cross_sampler = train_factory.generate_split(1)
     idz, tz = [], []
     for v in [train_sampler, cross_sampler, test_sampler]:
         (_, ident) = v.pull_samples(1000)
+        print(ident)
         idz.append(ident[:, 0])
         tz.append(ident[:, 1])
     _color_idents(idz, tz)
