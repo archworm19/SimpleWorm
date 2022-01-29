@@ -120,12 +120,12 @@ class SmallSampler(sampler_iface.Sampler):
             np.ndarray: id data in original data shape
         """
         # first: break up between tseries and ids:
-        t_shape = [self.window_size] + np.shape(self.data[0])[1:]
+        t_shape = [self.window_size] + list(np.shape(self.data)[1:])
         num_dim_t = int(np.prod(t_shape))
         t_dat = dat_flat[:, :num_dim_t]
         id_dat = dat_flat[:, num_dim_t:]
         # reshape time series data to get back to og size
-        re_t_dat = np.reshape(t_dat, t_shape)
+        re_t_dat = np.reshape(t_dat, [-1] + t_shape)
         return re_t_dat, id_dat
 
     def get_sample_size(self):
@@ -320,8 +320,13 @@ if __name__ == "__main__":
     train_sampler, cross_sampler = train_factory.generate_split(1)
     idz, tz = [], []
     for v in [train_sampler, cross_sampler, test_sampler]:
-        (_, ident) = v.pull_samples(1000)
+        (dtseries, ident) = v.pull_samples(1000)
         print(ident)
         idz.append(ident[:, 0])
         tz.append(ident[:, 1])
+        # TESTING: flattening and unflattening
+        flatz = v.flatten_samples(dtseries, ident)
+        udtseries, uident = v.unflatten_samples(flatz)
+        assert(np.sum(dtseries != udtseries) < 1), "unflatten check1"
+        assert(np.sum(ident != uident) < 1), "unflatten check1"
     _color_idents(idz, tz)
