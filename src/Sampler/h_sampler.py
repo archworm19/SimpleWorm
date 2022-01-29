@@ -15,6 +15,7 @@
     # > > houses data and indices into array
     # > > keeps track of exhausted
 """
+from turtle import shape
 from typing import List
 import numpy as np
 import numpy.random as npr
@@ -147,7 +148,7 @@ class SSFactoryEvenSplit:
             # find all legal windows:
             legal_starts_off = self._find_legal_windows(self.set_bools[i][rt0:])
             # NOTE: VERY IMPORTANT: offset and random start added in here
-            legal_starts = legal_starts_off + rt0 + offset
+            legal_starts = np.array(legal_starts_off) + rt0 + offset
             # split legal windows across the 2 sets:
             tr_assign = rng_gen.random(len(legal_starts)) < self.tr_prob
             subtr_t0s, subtest_t0s = [], []
@@ -258,18 +259,26 @@ def build_small_factory(dat: List[np.ndarray],
     return TrainFactory, TestFactory.generate_split(0)[0]
 
 
-def _search_ident(ident: np.ndarray,
-                  query_patrn: np.ndarray):
-    """Testing function
-    Looking for duplicate identities
-
-    Args:
-        ident (np.ndarray): N x m array
-        query_patrn (np.ndarray): len m array
+def _color_idents(dat_ids: List[np.ndarray],
+                  t_ids: List[np.ndarray]):
+    """Testing function to ensure no sampling
+        overlap
+    Assumes: t_id entries are normalized
     """
-    m = np.shape(ident)[1]
-    b = query_patrn[None] == ident
-    return np.where(np.sum(b, axis=1) >= m)[0]
+    # compress all entries to single dim:
+    newts, colours = [], []
+    for i in range(len(dat_ids)):
+        newts.append(dat_ids[i] + t_ids[i])
+        colours.append(i * np.ones((len(newts[-1]))))
+    newts = np.hstack(newts)
+    sinds = np.argsort(newts)
+    newts = newts[sinds]
+    colours = np.hstack(colours)[sinds]
+    # collision check:
+    assert(len(np.unique(newts)) == len(newts)), "collision failure"
+    colour_ar = np.vstack((newts, colours)).T
+    print(colour_ar)
+    print(np.shape(colour_ar))
 
 
 if __name__ == "__main__":
@@ -278,20 +287,9 @@ if __name__ == "__main__":
     d2 = 2 * np.ones((400, 3))
     train_factory, test_sampler = build_small_factory([d1, d2], 6, 4, 42)
     train_sampler, cross_sampler = train_factory.generate_split(1)
-    identz = []
+    idz, tz = [], []
     for v in [train_sampler, cross_sampler, test_sampler]:
         (_, ident) = v.pull_samples(1000)
-        identz.append(ident)
-    collisions = []
-    for i in range(len(identz)):
-        idi = identz[i]
-        for j in range(np.shape(idi)[0]):
-            for k in range(len(identz)):
-                if k == i:
-                    continue
-                idk = identz[k]
-                collisions.append(_search_ident(idk, idi[j,:]))
-    print('number of available ids: {0}'.format(str(len(collisions))))
-    print('collisions: {0}'.format(str(np.array(collisions))))
-    
-    # Q: 
+        idz.append(ident[:, 0])
+        tz.append(ident[:, 1])
+    _color_idents(idz, tz)
