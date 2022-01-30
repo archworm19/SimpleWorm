@@ -35,7 +35,11 @@ class SmallSampler(sampler_iface.Sampler):
                  data: np.ndarray,
                  ident_dat: np.ndarray,
                  window_starts: np.ndarray,
-                 window_size: int):
+                 window_size: int,
+                 dep_t_mask = np.ndarray,
+                 dep_id_mask = np.ndarray,
+                 indep_t_mask = np.ndarray,
+                 indep_id_mask = np.ndarray):
         """Initialize HSampler
 
         Args:
@@ -50,11 +54,20 @@ class SmallSampler(sampler_iface.Sampler):
                 indicate source animal
             window_starts: beginning of legal 
                 time windows
+            window_size (np.ndarray): size of each timewindow
+            masks (np.ndarray): boolean masks for selection of
+                independent/dependent dims for timeseries and
+                id data
         """
         self.data = data
         self.ident_dat = ident_dat
         self.window_starts = window_starts
         self.window_size = window_size
+        self.dep_t_mask = dep_t_mask
+        self.dep_id_mask = dep_id_mask
+        self.indep_t_mask = indep_t_mask
+        self.indep_id_mask = indep_id_mask
+
         self.next_sample = 0
 
     def shuffle(self, rng_seed: int = 42):
@@ -94,44 +107,87 @@ class SmallSampler(sampler_iface.Sampler):
         self.next_sample += num_samples
         return np.array(batch), np.array(ident_batch)
 
-    # TODO: mappings; flattening and unflattening
+    def _fselection(self, ar_sample: np.ndarray, mask: np.ndarray):
+        """ar_sample has multiple samples. Mask does not
+            account for num_sample natively
+            --> tile mask and select ar_sample subset
+            KEY: returns a slice into ar_sample"""
+        num_sample = np.shape(ar_sample)[0]
+        nm_tile = [num_sample] + [1 for z in np.shape(mask)]
+        mask_tile = np.tile(mask[None], nm_tile)
+        return ar_sample[mask_tile]
 
     def flatten_samples(self,
                         dat_tseries: np.ndarray,
                         dat_ids: np.ndarray):
         """flatten samples
-        Takes in structured timeseries and identity data
-        --> flattens it to N x M array
+        Takes in structured timeseries and identity batch data
+        > spits it into independent and dependent data
+        > flattens both to [num_sample] x m_i
 
         Args:
-            dat_tseries (np.ndarray): num_samples x T x ... array
+            dat_tseries (np.ndarray): num_samples x T x m array
             dat_ids (np.ndarray):
+
+        Returns:
+            np.ndarray: independent flattened data
+            np.ndarray: dependent flattened data
         """
         sample_size = np.shape(dat_tseries)[0]
-        return np.hstack((np.reshape(dat_tseries, (sample_size, -1)),
-                          dat_ids))
+        # order data
+        raw = [dat_tseries, dat_ids]
+        mindraw = [self.indep_t_mask, self.indep_id_mask]
+        mdepraw = [self.dep_t_mask, self.dep_id_mask]
+        # apply masks
+        indep = [self._fselection(raw[i], mindraw[i]) for i in range(len(raw))]
+        dep = [self._fselection(raw[i], mdepraw[i]) for i in range(len(raw))]
+        # flatten and stack
+        for v in [indep, dep]:
+            v = np.hstack([np.reshape(v, (sample_size, -1))])
+        return indep, dep
     
-    def unflatten_samples(self, dat_flat: np.ndarray):
+    # TODO: needs reworking with masks
+    def unflatten_samples(self,
+                          dat_flat: np.ndarray,
+                          indep: bool = True):
         """Reshape flatten data back to original shape
         Inverse operation of flatten_sampels
 
         Args:
             dat_flat (np.ndarray): N x M array
                 where N = number of samples
+            indep (bool): whether this is independent (True)
+                or dependent sample
         
         Returns:
             np.ndarray: time series data in original
                 data shape
             np.ndarray: id data in original data shape
         """
+        # TODO: figure out what masks to use
+        if indep:
+            umasks = [self.indep_t_mask, self.indep_id_mask]
+        else:
+            umasks = [self.dep_t_mask, self.dep_id_mask]
+
+        num_sample = np.shape(dat_flat)[0]
+        parent_shape = [[num_sample, self.window_size] + np.shape(self.data[0])[1:],
+                        [num_sample] + np.shape(self.ident_dat[0])[1:]]
+
         # first: break up between tseries and ids:
-        t_shape = [self.window_size] + list(np.shape(self.data)[1:])
-        num_dim_t = int(np.prod(t_shape))
-        t_dat = dat_flat[:, :num_dim_t]
-        id_dat = dat_flat[:, num_dim_t:]
-        # reshape time series data to get back to og size
-        re_t_dat = np.reshape(t_dat, [-1] + t_shape)
-        return re_t_dat, id_dat
+        dim0 = int(np.sum(umasks[0]))
+        t_dat = dat_flat[:, :dim0]
+        id_dat = dat_flat[:, dim0:]
+        fdatz = [t_dat, id_dat]
+
+        # TODO: invert the masks
+        big_dats = []
+        for i in range(len(umasks)):
+            stru = np.nan * np.ones(parent_shape[i])
+            strusub = self._fselection(stru)
+            strusub = fdatz
+            big_dats.append(strusub)
+        return big_dats[0], big_dats[1]
 
     def get_sample_size(self):
         return len(self.window_starts)
