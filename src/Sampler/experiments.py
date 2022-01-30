@@ -32,6 +32,7 @@ def _assert_dim_match(dat: List[np.ndarray]):
             vi = np.array(np.shape(d)[1:])
             assert(np.sum(v0 != vi) < 1), "dim match assertion failure"
 
+
 def build_anml_factory(dat: List[np.ndarray],
                         twindow_size: int,
                         rand_seed: int = 42):
@@ -47,11 +48,19 @@ def build_anml_factory(dat: List[np.ndarray],
             used by sampler
         rand_seed (int, optional): Defaults to 42.
     """
+    # ensure dims match across datasets
+    _assert_dim_match(dat)
+
     # get max data length for length normalization:
     max_dlen = _get_max_dat_len(dat)
 
+    # shuffle-based sampling
     gen = npr.default_rng(rand_seed)
-    train_anmls = gen.random(len(dat)) < 0.667
+    inds = np.arange(len(dat))
+    gen.shuffle(inds)
+    numtr = int((2./3.) * len(inds))
+    train_anmls = np.full((len(dat),), False)
+    train_anmls[inds[:numtr]] = True
 
     # build identity data:
     ident_dat = []
@@ -67,8 +76,9 @@ def build_anml_factory(dat: List[np.ndarray],
     test_factory = ANMLFactory(dat,
                                 ident_dat,
                                 np.logical_not(train_anmls),
-                                twindow_size)
-    return train_factory, test_factory
+                                twindow_size,
+                                1.)
+    return train_factory, test_factory.generate_split(0)[0]
 
 
 def build_small_factory(dat: List[np.ndarray],
@@ -175,5 +185,21 @@ def test_even_split():
     _color_idents(idz, tz)
 
 
+def test_anml():
+    # test samplers with fake data
+    d1 = 1 * np.ones((300, 3))
+    d2 = 2 * np.ones((400, 3))
+    d3 = 3 * np.ones((500, 3))
+    train_factory, test_sampler = build_anml_factory([d1, d2, d3], 6)
+    train_sampler, cross_sampler = train_factory.generate_split(1)
+    for v in [train_sampler, cross_sampler, test_sampler]:
+        print(v)
+        (dtseries, ident) = v.pull_samples(1000)
+        print(dtseries[:3])
+        print(ident[:3])
+        input('cont?')
+
+
 if __name__ == "__main__":
-    test_even_split()
+    #test_even_split()
+    test_anml()
