@@ -34,8 +34,12 @@ def _assert_dim_match(dat: List[np.ndarray]):
 
 
 def build_anml_factory(dat: List[np.ndarray],
-                        twindow_size: int,
-                        rand_seed: int = 42):
+                       twindow_size: int,
+                       dep_t_mask = np.ndarray,
+                       dep_id_mask = np.ndarray,
+                       indep_t_mask = np.ndarray,
+                       indep_id_mask = np.ndarray,
+                       rand_seed: int = 42):
     """animal factory
     break up train-test by animals
     Assumes: each array in dat is for different animal
@@ -46,6 +50,9 @@ def build_anml_factory(dat: List[np.ndarray],
         dat (List[np.ndarray]): animal data
         twindow_size (int): sampling twindow size 
             used by sampler
+        masks (np.ndarray): boolean arrays indicating
+            which dimensions are independent / depdendent
+            variables
         rand_seed (int, optional): Defaults to 42.
     """
     # ensure dims match across datasets
@@ -72,11 +79,19 @@ def build_anml_factory(dat: List[np.ndarray],
     train_factory = ANMLFactory(dat,
                                 ident_dat,
                                 train_anmls,
-                                twindow_size)
+                                twindow_size,
+                                dep_t_mask,
+                                dep_id_mask,
+                                indep_t_mask,
+                                indep_id_mask)
     test_factory = ANMLFactory(dat,
                                 ident_dat,
                                 np.logical_not(train_anmls),
                                 twindow_size,
+                                dep_t_mask,
+                                dep_id_mask,
+                                indep_t_mask,
+                                indep_id_mask,
                                 1.)
     return train_factory, test_factory.generate_split(0)[0]
 
@@ -190,13 +205,26 @@ def test_anml():
     d1 = 1 * np.ones((300, 3))
     d2 = 2 * np.ones((400, 3))
     d3 = 3 * np.ones((500, 3))
-    train_factory, test_sampler = build_anml_factory([d1, d2, d3], 6)
+    # test mask ~ dims 0 and 2 --> indep; 1 --> dep
+    dep_t_mask = np.array([False, True, False])
+    dep_t_mask = np.tile(dep_t_mask[None], (6, 1))
+    # neither id covariate is depenetent
+    dep_id_mask = np.array([False, False])
+    indep_t_mask = np.logical_not(dep_t_mask)
+    indep_id_mask = np.logical_not(dep_id_mask)
+    train_factory, test_sampler = build_anml_factory([d1, d2, d3], 6,
+                                                      dep_t_mask,
+                                                      dep_id_mask,
+                                                      indep_t_mask,
+                                                      indep_id_mask)
     train_sampler, cross_sampler = train_factory.generate_split(1)
     for v in [train_sampler, cross_sampler, test_sampler]:
         print(v)
         (dtseries, ident) = v.pull_samples(1000)
         print(dtseries[:3])
         print(ident[:3])
+        indep_flat, dep_flat = v.flatten_samples(dtseries, ident)
+        print(indep_flat[:3])
         input('cont?')
 
 

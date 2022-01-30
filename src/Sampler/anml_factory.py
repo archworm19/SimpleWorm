@@ -17,6 +17,10 @@ class ANMLFactory:
                  ident_dat: List[np.ndarray],
                  dat_assign: np.ndarray,
                  twindow_size: int,
+                 dep_t_mask = np.ndarray,
+                 dep_id_mask = np.ndarray,
+                 indep_t_mask = np.ndarray,
+                 indep_id_mask = np.ndarray,
                  tr_prob = 0.5):
         """[summary]
 
@@ -33,6 +37,10 @@ class ANMLFactory:
         self.ident_dat = ident_dat
         self.twindow_size = twindow_size
         self.tr_prob = tr_prob
+        self.dep_t_mask = dep_t_mask
+        self.dep_id_mask = dep_id_mask
+        self.indep_t_mask = indep_t_mask
+        self.indep_id_mask = indep_id_mask
         assert(len(self.dat_assign) == len(self.data)), "num anml mismatch"
 
     def _shuffle_sample(self,
@@ -90,6 +98,8 @@ class ANMLFactory:
         full_dat = np.vstack([d for d in self.data])
         full_id_dat = np.vstack([idn for idn in self.ident_dat])
 
-        return [SmallSampler(full_dat, full_id_dat, np.hstack(train_wins), self.twindow_size),
-                SmallSampler(full_dat, full_id_dat, np.hstack(test_wins), self.twindow_size)]
+        return [SmallSampler(full_dat, full_id_dat, np.hstack(train_wins), self.twindow_size,
+                             self.dep_t_mask, self.dep_id_mask, self.indep_t_mask, self.indep_id_mask),
+                SmallSampler(full_dat, full_id_dat, np.hstack(test_wins), self.twindow_size,
+                             self.dep_t_mask, self.dep_id_mask, self.indep_t_mask, self.indep_id_mask)]
 

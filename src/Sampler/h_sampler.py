@@ -22,6 +22,7 @@
     TODO: move factories to separate file
 
 """
+from typing import List
 import numpy as np
 import numpy.random as npr
 import sampler_iface
@@ -36,10 +37,10 @@ class SmallSampler(sampler_iface.Sampler):
                  ident_dat: np.ndarray,
                  window_starts: np.ndarray,
                  window_size: int,
-                 dep_t_mask = np.ndarray,
-                 dep_id_mask = np.ndarray,
-                 indep_t_mask = np.ndarray,
-                 indep_id_mask = np.ndarray):
+                 dep_t_mask: np.ndarray,
+                 dep_id_mask: np.ndarray,
+                 indep_t_mask: np.ndarray,
+                 indep_id_mask: np.ndarray):
         """Initialize HSampler
 
         Args:
@@ -67,7 +68,6 @@ class SmallSampler(sampler_iface.Sampler):
         self.dep_id_mask = dep_id_mask
         self.indep_t_mask = indep_t_mask
         self.indep_id_mask = indep_id_mask
-
         self.next_sample = 0
 
     def shuffle(self, rng_seed: int = 42):
@@ -107,15 +107,29 @@ class SmallSampler(sampler_iface.Sampler):
         self.next_sample += num_samples
         return np.array(batch), np.array(ident_batch)
 
-    def _fselection(self, ar_sample: np.ndarray, mask: np.ndarray):
+    def _fselection(self, num_sample: int, mask: np.ndarray):
         """ar_sample has multiple samples. Mask does not
             account for num_sample natively
-            --> tile mask and select ar_sample subset
-            KEY: returns a slice into ar_sample"""
-        num_sample = np.shape(ar_sample)[0]
-        nm_tile = [num_sample] + [1 for z in np.shape(mask)]
+            --> tile mask for mult samples
+            --> flatten
+            KEY: returns reshaped mask"""
+        nm_tile = [num_sample] + [1 for _ in list(np.shape(mask))]
         mask_tile = np.tile(mask[None], nm_tile)
-        return ar_sample[mask_tile]
+        return np.reshape(mask_tile, (num_sample, -1))
+
+    def _flatten_helper(self,
+                        sample_size: int,
+                        dats: List[np.ndarray],
+                        masks: List[np.ndarray]):
+        # TODO: docstring
+        # flatten data + apply flattened masks
+        fdat_l = []
+        for i, d in enumerate(dats):
+            dfla = np.reshape(d, (sample_size, -1))
+            mfla = self._fselection(sample_size, masks[i])
+            vre = np.reshape(dfla[mfla], (sample_size, -1))
+            fdat_l.append(vre)
+        return np.hstack(fdat_l)
 
     def flatten_samples(self,
                         dat_tseries: np.ndarray,
@@ -126,8 +140,8 @@ class SmallSampler(sampler_iface.Sampler):
         > flattens both to [num_sample] x m_i
 
         Args:
-            dat_tseries (np.ndarray): num_samples x T x m array
-            dat_ids (np.ndarray):
+            dat_tseries (np.ndarray): num_samples x T x ... array
+            dat_ids (np.ndarray): num_sampels x M array
 
         Returns:
             np.ndarray: independent flattened data
@@ -135,16 +149,17 @@ class SmallSampler(sampler_iface.Sampler):
         """
         sample_size = np.shape(dat_tseries)[0]
         # order data
-        raw = [dat_tseries, dat_ids]
-        mindraw = [self.indep_t_mask, self.indep_id_mask]
-        mdepraw = [self.dep_t_mask, self.dep_id_mask]
-        # apply masks
-        indep = [self._fselection(raw[i], mindraw[i]) for i in range(len(raw))]
-        dep = [self._fselection(raw[i], mdepraw[i]) for i in range(len(raw))]
-        # flatten and stack
-        for v in [indep, dep]:
-            v = np.hstack([np.reshape(v, (sample_size, -1))])
-        return indep, dep
+        raw = [dat_tseries, dat_ids, dat_tseries, dat_ids]
+        maskz = [self.indep_t_mask, self.indep_id_mask,
+                 self.dep_t_mask, self.dep_id_mask]
+
+        indep2 = self._flatten_helper(sample_size,
+                                      raw[:2],
+                                      maskz[:2])
+        dep2 = self._flatten_helper(sample_size,
+                                      raw[2:],
+                                      maskz[2:])
+        return indep2, dep2
     
     # TODO: needs reworking with masks
     def unflatten_samples(self,
@@ -171,23 +186,22 @@ class SmallSampler(sampler_iface.Sampler):
             umasks = [self.dep_t_mask, self.dep_id_mask]
 
         num_sample = np.shape(dat_flat)[0]
-        parent_shape = [[num_sample, self.window_size] + np.shape(self.data[0])[1:],
-                        [num_sample] + np.shape(self.ident_dat[0])[1:]]
 
-        # first: break up between tseries and ids:
-        dim0 = int(np.sum(umasks[0]))
-        t_dat = dat_flat[:, :dim0]
-        id_dat = dat_flat[:, dim0:]
-        fdatz = [t_dat, id_dat]
+        # approach: initialize unflattened data in correct
+        # shape with nans = unflat
+        # > flatten and mask unflat --> assign to flattened data
+        unflat_t = np.nan * np.ones(([num_sample, self.window_size] + np.shape(self.data[0])[1:]))
+        unflat_id = np.nan * np.ones(([num_sample] + np.shape(self.ident_dat[0])[1:]))
+        unflat_l = [unflat_t, unflat_id]
 
-        # TODO: invert the masks
-        big_dats = []
-        for i in range(len(umasks)):
-            stru = np.nan * np.ones(parent_shape[i])
-            strusub = self._fselection(stru)
-            strusub = fdatz
-            big_dats.append(strusub)
-        return big_dats[0], big_dats[1]
+        for i, uma in enumerate(umasks):
+            # reshape/flatten mask --> num_sample x m
+            mask2 = self._fselection(num_sample, uma)
+            mask_len = np.shape(mask2)[1]
+            funf = np.reshape(unflat_l[i], (num_sample, -1))
+            funf[mask2] = dat_flat[:,:mask_len]
+
+        return unflat_t, unflat_id
 
     def get_sample_size(self):
         return len(self.window_starts)
