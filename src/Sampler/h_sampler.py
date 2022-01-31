@@ -214,19 +214,10 @@ class SmallSampler(sampler_iface.Sampler):
             # 1. unflat data -> funf
             # 2. mask -> fmask
             # 3. flat data -> ff
-            print('the unflattening')
             og_shape = np.shape(unflat_l[i])
             funf = np.reshape(unflat_l[i], (-1,))
             fmask = np.reshape(self._fselection(num_sample, umask), (-1,))
             ff = np.reshape(flat_l[i], (-1,))
-
-            print(np.shape(og_shape))
-            print(np.shape(funf))
-            print(np.shape(fmask))
-            print(np.sum(umask))
-            print(np.shape(ff))
-            input('cont?')
-
             funf[fmask] = ff
             fin_unflat.append(np.reshape(funf, og_shape))
         return fin_unflat[0], fin_unflat[1]
