@@ -187,21 +187,49 @@ class SmallSampler(sampler_iface.Sampler):
 
         num_sample = np.shape(dat_flat)[0]
 
+        # approach: 
+        # > init nan data in unflattened shape ~ unflat
+        # > full flatten everything, including masks
+        # > reshape unflat data
+
         # approach: initialize unflattened data in correct
         # shape with nans = unflat
         # > flatten and mask unflat --> assign to flattened data
-        unflat_t = np.nan * np.ones(([num_sample, self.window_size] + np.shape(self.data[0])[1:]))
-        unflat_id = np.nan * np.ones(([num_sample] + np.shape(self.ident_dat[0])[1:]))
+        unflat_t = np.nan * np.ones(([num_sample, self.window_size] + list(np.shape(self.data)[1:])))
+        unflat_id = np.nan * np.ones(([num_sample] + list(np.shape(self.ident_dat)[1:])))
         unflat_l = [unflat_t, unflat_id]
+        split_pt = int(np.sum(umasks[0]))
+        flat_l = [dat_flat[:, :split_pt], dat_flat[:, split_pt:]]
 
-        for i, uma in enumerate(umasks):
-            # reshape/flatten mask --> num_sample x m
-            mask2 = self._fselection(num_sample, uma)
-            mask_len = np.shape(mask2)[1]
-            funf = np.reshape(unflat_l[i], (num_sample, -1))
-            funf[mask2] = dat_flat[:,:mask_len]
+        # iter thru data types (tseries, ids)
+        fin_unflat = []
+        for i, umask in enumerate(umasks):
 
-        return unflat_t, unflat_id
+            # case where there are no useable variables
+            if np.sum(umask) < .5:
+                fin_unflat.append(unflat_l[i])
+                continue
+
+            # reshape ~ completely flatten
+            # 1. unflat data -> funf
+            # 2. mask -> fmask
+            # 3. flat data -> ff
+            print('the unflattening')
+            og_shape = np.shape(unflat_l[i])
+            funf = np.reshape(unflat_l[i], (-1,))
+            fmask = np.reshape(self._fselection(num_sample, umask), (-1,))
+            ff = np.reshape(flat_l[i], (-1,))
+
+            print(np.shape(og_shape))
+            print(np.shape(funf))
+            print(np.shape(fmask))
+            print(np.sum(umask))
+            print(np.shape(ff))
+            input('cont?')
+
+            funf[fmask] = ff
+            fin_unflat.append(np.reshape(funf, og_shape))
+        return fin_unflat[0], fin_unflat[1]
 
     def get_sample_size(self):
         return len(self.window_starts)

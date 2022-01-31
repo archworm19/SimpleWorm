@@ -225,6 +225,8 @@ def test_anml():
         print(ident[:3])
         indep_flat, dep_flat = v.flatten_samples(dtseries, ident)
         print(indep_flat[:3])
+        indep_t, indep_id = v.unflatten_samples(indep_flat, indep=False)
+        print(indep_t)
         input('cont?')
 
 
