@@ -1,5 +1,6 @@
 """Clustering Tools
 """
+from dis import dis
 import numpy as np
 import numpy.random as npr
 
@@ -9,7 +10,7 @@ class KMeans:
         self.num_means = num_means
         self.rng = npr.default_rng(42)
 
-    def _assign_iter(self,
+    def assign_iter(self,
                      means: np.ndarray,
                      dat: np.ndarray):
         """Single KMeans assignment iteration
@@ -19,13 +20,19 @@ class KMeans:
                 array representing means
             dat (np.ndarray): num_sample x N
                 array representing data samples
+        
+        Returns:
+            np.ndarray: cluster assignments
+            np.ndarray: distance matrix
+                num_means x num_sample
+
         """
         # make num_means x num_sample distance matrix
         # use mean to prevent potential overflow
         dist_mat = np.mean((dat[None,:] - means[:,None])**2.0, axis=2)
         # assign data to means --> num_sample array of indices
         clust_assigns = np.argmin(dist_mat, axis=0)
-        return clust_assigns
+        return clust_assigns, dist_mat
     
     def _handle_cluster_loss(self,
                              new_means: np.ndarray,
@@ -76,13 +83,93 @@ class KMeans:
         dat = dat[sinds]
         # split across clusters
         _, uniqinds = np.unique(clust_assigns, return_index=True)
-        grps = np.split(clust_assigns, uniqinds)[1:]
-        means = [], grp_size = []
-        for grp in grps:
-            means.append(np.mean(dat[grp], axis=0))
-            grp_size.append(len(grp))
+        dgrps = np.split(dat, uniqinds)[1:]
+        means, grp_size = [], []
+        for dgrp in dgrps:
+            means.append(np.mean(dgrp, axis=0))
+            grp_size.append(len(dgrp))
         # deal with cluster loss
         if len(means) < self.num_means:
             means = means + self._handle_cluster_loss(np.array(means),
                                                       grp_size)
         return np.array(means)
+
+    
+    def _init_means(self, dat: np.ndarray):
+        """Get initial means
+        > randomly choose data points from dat
+
+        Args:
+            dat (np.ndarray): N x M raw data
+        
+        Returns:
+            np.ndarray: num_means x M means
+        """
+        assert(np.shape(dat)[0] >= self.num_means), "not enough data"
+        inds = np.arange(np.shape(dat)[0])
+        self.rng.shuffle(inds)
+        return dat[inds[:self.num_means]]
+    
+    def run(self, dat: np.ndarray, num_iter: int = 5):
+        """Single KMean runs
+
+        Args:
+            dat (np.ndarray): raw data
+            num_iter (int): number of iterations
+        
+        Returns:
+        """
+        means = self._init_means(dat)
+        for _ in range(num_iter):
+            clust_assigns, _ = self.assign_iter(means, dat)
+            means = self._update_iter(dat, clust_assigns)
+        _, dist_mat = self.assign_iter(means, dat)
+        return means, dist_mat
+    
+    def multi_run(self,
+                  dat: np.ndarray,
+                  num_iter: int = 5,
+                  num_run: int = 3):
+        """Run KMeans from different starting points
+
+        Args:
+            dat (np.ndarray): raw data
+            num_iter (int, optional):
+            num_run (int, optional):
+        """
+        min_dist, means = None, None
+        for _ in range(num_run):
+            cmeans, dists = self.run(dat, num_iter)
+            cdist = np.mean(np.argmin(dists, axis=1))
+            if min_dist is None or cdist < min_dist:
+                min_dist = cdist
+                means = cmeans
+        return means
+
+
+if __name__ == '__main__':
+    # kmeans testing
+    import pylab as plt
+    km = KMeans(2)
+    dat = np.array([[1, 1, 1, 1],
+                    [2, 2, 2, 2],
+                    [100, 100, 100, 100],
+                    [101, 100, 101, 99]])
+    means, dist_mat = km.run(dat)
+    print(means)
+    print(dist_mat)
+    means = km.multi_run(dat)
+    print(means)
+
+    # more kmeans testing
+    rng = npr.default_rng(0)
+    v1 = npr.rand(10, 2)
+    v2 = npr.rand(15, 2) + .5 * np.ones((15, 2))
+    dat = np.vstack((v1, v2))
+    means = km.multi_run(dat)
+    print(means)
+    print(km.assign_iter(means, dat))
+    plt.figure()
+    plt.scatter(dat[:,0], dat[:,1])
+    plt.scatter(means[:,0], means[:,1], c='r')
+    plt.show()
