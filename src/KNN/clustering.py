@@ -64,7 +64,6 @@ class KMeans:
             # add mean:
             add_means.append(new_means[maxg] + self.rng.random(mu_shape))
         return add_means
-
     
     def _update_iter(self,
                      dat: np.ndarray,
@@ -93,7 +92,6 @@ class KMeans:
             means = means + self._handle_cluster_loss(np.array(means),
                                                       grp_size)
         return np.array(means)
-
     
     def _init_means(self, dat: np.ndarray):
         """Get initial means
