@@ -3,6 +3,7 @@
 from dis import dis
 import numpy as np
 import numpy.random as npr
+import numpy.linalg as nplg
 
 class KMeans:
 
@@ -144,10 +145,155 @@ class KMeans:
                 means = cmeans
         return means
 
+class wGMM:
+    """Weighted Gaussian Mixture Modeling
+    Weights = priors    
+    """
 
-if __name__ == '__main__':
-    # kmeans testing
-    import pylab as plt
+    def __init__(self, num_means: int, tolerance: float = 1e-5):
+        """Initialize weighted Gaussian Mixture Model
+
+        Args:
+            num_means (int): number of clusters/means
+            tolerance (float): tolerance for decomposition
+                prevents vanishing variance
+        """
+        self.num_means = num_means
+        self.tolerance = tolerance
+        self.rng = npr.default_rng(66)
+        self.km = KMeans(num_means)
+
+    def _calc_covar(self,
+                    dat: np.ndarray,
+                    means: np.ndarray):
+        """Calculate covariance matrices
+
+        Args:
+            dat (np.ndarray): num_sample x N
+                array of raw data samples
+            means (np.ndarray): num_mean x N
+                set of means
+        
+        Returns:
+            np.ndarray: num_means x N x N
+                covariance matrices for each mean
+                order-matched to input
+            np.ndarray: num_mean x num_sample x N
+                differences (x - mu)
+                where x = data
+                mu = means
+        """
+        # subtract means
+        # --> num_mean x num_sample x N
+        di = dat[None] - means[:, None]
+        # calc each covariance matrix
+        # --> num_mean x N x N
+        covars = np.mean(di[:,:,None] * di[:,:,:,None],
+                         axis=1)
+        return covars, di
+
+    def _decompose_covar(self, covar_mat: np.ndarray):
+        """SVD decomposition of covariance matrix
+        --> get inverse and determinant of inverse
+
+        Args:
+            covar_mat (np.ndarray): N x N covariance matrix
+
+        Returns:
+            np.array: N x N prevision array
+                inverse of covariance matrix
+            float: | determinant | of the precision
+        """
+        # covariance matrix is real and symmetric
+        # --> hermetian
+        # decompose into U S V^T
+        # NOTE: symmetric matrix --> singular
+        # values = absolute values of eigenvalues
+        u, s, vt = nplg.svd(covar_mat, hermitian=True)
+
+        # apply tolerance to singular values:
+        s[s < self.tolerance] = self.tolerance
+
+        # determinant = product of singular values
+        det = np.prod(s)
+
+        # invert s
+        # since diagonal --> elem-wise inverse
+        sinv = 1. / s
+
+        # inverse calculation
+        precision = vt.T @ np.diag(sinv) @ u.T
+
+        return precision, det
+    
+    def _mmult(self,
+               A: np.ndarray,
+               B: np.ndarray,
+               C: np.ndarray):
+        """Helper function A mult B mult C
+        A = num_sample x N
+        B = N x M
+        C = num_sample x M"""
+        # --> num_sample x M
+        m1 = np.sum(A[:, :, None] * B[None], axis=1)
+        # --> num_sample
+        m2 = np.sum(m1 * C, axis=1)
+        return m2
+    
+    def _apply_gaussian(self,
+                        di: np.ndarray,
+                        precision: np.ndarray,
+                        cov_det: float):
+        """Calculate multivariate gaussian
+        probabilities of data for single gaussian
+        NOTE: assumes x - mu differences already
+        computed
+
+        Args:
+            di (np.ndarray): x - mu differences
+                num_sample x N
+            precision (np.ndarray): single precision
+                matrix
+                N x N
+            cov_det (float): determinant of covariance
+                matrix = prevision ^ -1
+        """
+        m = self._mmult(di, precision, di)
+        # numerator --> num_sample
+        num = np.exp(-.5 * m)
+        # denom --> float
+        denom = np.sqrt(((2. * np.pi)**self.num_means)
+                         * cov_det)
+        return num / denom
+    
+    # TODO: complete
+
+    def assign_iter(self,
+                     means: np.ndarray,
+                     precisions: np.ndarray,
+                     dat: np.ndarray):
+        """Single GMM assignment iteration
+        P(cluster | sample) = P(sample | cluster) P(cluster) /
+                                    sum(P(sample | cluster))
+
+        Args:
+            means (np.ndarray): num_means x N
+                array representing means
+            precisions (np.ndarray): inverse of covariance
+                matrices = num_means x N x N
+            dat (np.ndarray): num_sample x N
+                array representing data samples
+        
+        Returns:
+            
+
+        """
+        pass
+
+
+# TESTING
+
+def test_kmeans():
     km = KMeans(2)
     dat = np.array([[1, 1, 1, 1],
                     [2, 2, 2, 2],
@@ -171,3 +317,38 @@ if __name__ == '__main__':
     plt.scatter(dat[:,0], dat[:,1])
     plt.scatter(means[:,0], means[:,1], c='r')
     plt.show()
+
+    return dat, means
+
+
+if __name__ == '__main__':
+    import pylab as plt
+
+    # kmeans testing
+    dat, means = test_kmeans()
+
+    # wGMM testing
+    print('WGMM')
+    G = wGMM(2)
+
+    # mmult ~ guarantees right order calc
+    G._mmult(npr.rand(20, 5),
+             npr.rand(5, 8),
+             npr.rand(20, 8))
+
+    covars, di = G._calc_covar(dat, means)
+    print(covars)
+    for i in range(len(covars)):
+        print('gauss_{0}'.format(i))
+        print('mean')
+        print(means[i])
+        prec, cov_det = G._decompose_covar(covars[i])
+        print('inversion?')
+        print(covars[i] @ prec)
+        print('determinant comparison?')
+        print(cov_det)
+        print(nplg.det(covars[i]))
+        probs = G._apply_gaussian(di[i], prec, cov_det)
+        plt.figure()
+        plt.scatter(dat[:,0], dat[:,1], s=probs*20)
+        plt.show()
