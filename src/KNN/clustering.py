@@ -159,15 +159,15 @@ class wKMeans:
                 num_mean x num_sample
         """
         assert(np.sum(priors) == 1), "priors must sum to 1"
-        min_dist, means, dists = None, None, None
+        min_dist, means, dmz = None, None, None
         for _ in range(num_run):
-            cmeans, cdists = self.run(dat, priors, num_iter)
-            cdist = np.mean(np.argmin(cdists, axis=1))
+            cmeans, dist_mat = self.run(dat, priors, num_iter)
+            cdist = np.mean(np.argmin(dist_mat, axis=1))
             if min_dist is None or cdist < min_dist:
                 min_dist = cdist
                 means = cmeans
-                dists = cdist
-        return means, dists
+                dmz = dist_mat
+        return means, dmz
 
 class wGMM:
     """Weighted Gaussian Mixture Modeling
@@ -327,9 +327,16 @@ class wGMM:
                 num_mean x num_sample x N
         """
 
+        # TODO: is this right???
+        # sinkhorn style..
+
+        # convert posteriors to weights:
+        weights = post_probs / np.sum(post_probs, axis=1,
+                                      keepdims=True)
+
         # weighted means:
         # --> num_mean x N
-        wmeans = np.sum(post_probs[:,:,None] * dat[None],
+        wmeans = np.sum(weights[:,:,None] * dat[None],
                         axis=1)
         
         # calculate raw difference:
@@ -341,7 +348,7 @@ class wGMM:
         outp = raw_diff[:,:,None] * raw_diff[:,:,:,None]
         # contract along samples:
         # --> num_mean x N x N
-        wcov = np.sum(post_probs[:,:,None,None] * outp,
+        wcov = np.sum(weights[:,:,None,None] * outp,
                       axis = 1)
 
         return wmeans, wcov, raw_diff
@@ -349,23 +356,45 @@ class wGMM:
     def run(self,
             dat: np.ndarray,
             priors: np.ndarray,
-            num_iter: int = 5):
+            num_iter: int = 10):
+        """Run GMM
+
+        Args:
+            dat (np.ndarray): raw data
+                num_sample x N
+            priors (np.ndarray): prior probabilities
+                len num_sample array
+            num_iter (int, optional): number of update
+                iterations
+
+        Returns:
+            np.ndarray: means
+                num_mean x N array
+            np.ndarray: covariance matrices
+                num_mean x N x N array
+            np.ndarray: posterior probabilities
+                num_mean x num_sample array
+        """
 
         # init with kmeans:
         # --> means = num_mean x N
         # --> dist_mat = num_mean x num_sample
         _, dist_mat = self.km.multi_run(dat, priors, num_iter, 2)
         # posterior estimate based on distance matrix:
-        # TODO: use prior
-        edist = np.exp(-.5 * dist_mat)
+        edist = np.exp(-2. * dist_mat) * priors[None]
         posts = edist / np.sum(edist, axis=0, keepdims=True)
 
         # repeated iterations of 
         # > means / covariance updates
         # > posterior probability calc
+
+        plt.figure()
+
         means, covars = None, None
         for _ in range(num_iter):
             means, covars, raw_diff = self.update(dat, posts)
+
+            plt.scatter(means[:, 0], means[:, 1])
 
             # decompose each covariance matrix
             # --> precision and determinant simul calc
@@ -375,8 +404,10 @@ class wGMM:
                 precisions.append(prec)
                 cov_dets.append(covd)
 
-            self.probs(raw_diff, np.array(precisions), np.array(cov_dets),
-                        priors)
+            posts, _, _ = self.probs(raw_diff, np.array(precisions), np.array(cov_dets),
+                                     priors)
+        
+        plt.show()
         
         return means, covars, posts
 
@@ -447,6 +478,23 @@ def test_gmm():
         print(var.pdf(dat))
         print(pr)
         input('cont?')
+    
+    # more testing
+    v1 = npr.rand(10, 2)
+    v2 = npr.rand(15, 2) + .9 * np.ones((15, 2))
+    priors = np.ones((25,)) / 25.
+    dat = np.vstack((v1, v2))
+    means, covars, posts = G.run(dat, priors)
+    print('means')
+    print(means)
+    print('covars')
+    print(covars)
+    print('posteriors')
+    print(posts)
+    plt.figure()
+    plt.scatter(dat[:,0], dat[:,1])
+    plt.scatter(means[:,0], means[:,1])
+    plt.show()
 
 
 
@@ -454,7 +502,7 @@ if __name__ == '__main__':
     import pylab as plt
 
     # kmeans testing
-    test_kmeans()
+    #test_kmeans()
 
     # wGMM testing
-    #test_gmm()
+    test_gmm()
