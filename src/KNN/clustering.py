@@ -1,6 +1,7 @@
 """Clustering Tools
 """
 from dis import dis
+from ntpath import join
 import numpy as np
 import numpy.random as npr
 import numpy.linalg as nplg
@@ -257,6 +258,9 @@ class wGMM:
                 N x N
             cov_det (float): determinant of covariance
                 matrix = prevision ^ -1
+        
+        Returns:
+            np.ndarray: forward probs = len num_sample
         """
         m = self._mmult(di, precision, di)
         # numerator --> num_sample
@@ -265,30 +269,46 @@ class wGMM:
         denom = np.sqrt(((2. * np.pi)**self.num_means)
                          * cov_det)
         return num / denom
-    
-    # TODO: complete
 
-    def assign_iter(self,
+    def probs(self,
                      means: np.ndarray,
                      precisions: np.ndarray,
-                     dat: np.ndarray):
-        """Single GMM assignment iteration
+                     cov_dets: np.ndarray,
+                     dat: np.ndarray,
+                     priors = np.ndarray):
+        """Single GMM probability iteration
+        == assignment
         P(cluster | sample) = P(sample | cluster) P(cluster) /
                                     sum(P(sample | cluster))
 
         Args:
             means (np.ndarray): num_means x N
                 array representing means
+            cov_dets (np.ndarray): covariance
+                determinants = len num_mean
             precisions (np.ndarray): inverse of covariance
                 matrices = num_means x N x N
             dat (np.ndarray): num_sample x N
                 array representing data samples
+            priors (np.ndarray): prior probs
+                = len num_sample
         
         Returns:
-            
-
         """
-        pass
+        # subtract means
+        # --> num_mean x num_sample x N
+        di = dat[None] - means[:, None]
+        # forward probs
+        fprobs = []
+        for i, cov_det in enumerate(cov_dets):
+            fprobs.append(self._apply_gaussian(di[i], precisions[i], cov_det))
+        # --> num_mean x num_sample
+        fprobs = np.array(fprobs)
+        # TODO: posterior probs
+        joint_probs = fprobs * priors[None]
+        post_probs = joint_probs / np.sum(joint_probs,
+                                            axis=0, keepdims=True)
+        return post_probs, joint_probs, fprobs
 
 
 # TESTING
@@ -352,3 +372,11 @@ if __name__ == '__main__':
         plt.figure()
         plt.scatter(dat[:,0], dat[:,1], s=probs*20)
         plt.show()
+    
+    # more specific testing:
+    from scipy.stats import multivariate_normal
+    var = multivariate_normal(mean=[2.0, 3.0], cov=[[1.0, 0.5], [0.5, 1.]])
+    print('scipy testing')
+    print(var.pdf([1, 0]))
+    # compare against ours:
+    # TODO
