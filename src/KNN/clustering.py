@@ -262,20 +262,21 @@ class wGMM:
         Returns:
             np.ndarray: forward probs = len num_sample
         """
+        dim = np.shape(di)[1]
         m = self._mmult(di, precision, di)
         # numerator --> num_sample
         num = np.exp(-.5 * m)
         # denom --> float
-        denom = np.sqrt(((2. * np.pi)**self.num_means)
+        denom = np.sqrt(((2. * np.pi)**dim)
                          * cov_det)
         return num / denom
 
     def probs(self,
-                     means: np.ndarray,
-                     precisions: np.ndarray,
-                     cov_dets: np.ndarray,
-                     dat: np.ndarray,
-                     priors = np.ndarray):
+              means: np.ndarray,
+              precisions: np.ndarray,
+              cov_dets: np.ndarray,
+              dat: np.ndarray,
+              priors: np.ndarray):
         """Single GMM probability iteration
         == assignment
         P(cluster | sample) = P(sample | cluster) P(cluster) /
@@ -307,7 +308,7 @@ class wGMM:
         # TODO: posterior probs
         joint_probs = fprobs * priors[None]
         post_probs = joint_probs / np.sum(joint_probs,
-                                            axis=0, keepdims=True)
+                                          axis=0, keepdims=True)
         return post_probs, joint_probs, fprobs
 
 
@@ -340,43 +341,48 @@ def test_kmeans():
 
     return dat, means
 
+def test_gmm():
+    # NOTE: need scipy to run test
+    # more specific testing:
+    print('GMM testing')
+    G = wGMM(2)
+
+    # mmult ~ guarantees right order calc
+    print('mmult test')
+    G._mmult(npr.rand(20, 5),
+             npr.rand(5, 8),
+             npr.rand(20, 8))
+
+    from scipy.stats import multivariate_normal
+    for _ in range(3):
+        mu = npr.rand(4)
+        cov_raw = npr.rand(4, 4)
+        cov = 5 * cov_raw @ cov_raw.T
+        print(cov)
+        print(nplg.eig(cov))
+        dat = npr.rand(4)
+        var = multivariate_normal(mean=mu, cov=cov)
+        # compare against ours:
+        precision, cov_det = G._decompose_covar(np.array(cov))
+        print('precision check: should be identity')
+        print(np.array(cov) @ precision)
+        print('determinant check')
+        print(nplg.det(np.array(cov)))
+        print(cov_det)
+        pr = G.probs(np.array(mu)[None], np.array(precision)[None], np.array(cov_det)[None],
+                    np.array(dat)[None], np.array([[1.]]))
+        print('iter; probs')
+        print(var.pdf(dat))
+        print(pr)
+        input('cont?')
+
+
 
 if __name__ == '__main__':
     import pylab as plt
 
     # kmeans testing
-    dat, means = test_kmeans()
+    # dat, means = test_kmeans()
 
     # wGMM testing
-    print('WGMM')
-    G = wGMM(2)
-
-    # mmult ~ guarantees right order calc
-    G._mmult(npr.rand(20, 5),
-             npr.rand(5, 8),
-             npr.rand(20, 8))
-
-    covars, di = G._calc_covar(dat, means)
-    print(covars)
-    for i in range(len(covars)):
-        print('gauss_{0}'.format(i))
-        print('mean')
-        print(means[i])
-        prec, cov_det = G._decompose_covar(covars[i])
-        print('inversion?')
-        print(covars[i] @ prec)
-        print('determinant comparison?')
-        print(cov_det)
-        print(nplg.det(covars[i]))
-        probs = G._apply_gaussian(di[i], prec, cov_det)
-        plt.figure()
-        plt.scatter(dat[:,0], dat[:,1], s=probs*20)
-        plt.show()
-    
-    # more specific testing:
-    from scipy.stats import multivariate_normal
-    var = multivariate_normal(mean=[2.0, 3.0], cov=[[1.0, 0.5], [0.5, 1.]])
-    print('scipy testing')
-    print(var.pdf([1, 0]))
-    # compare against ours:
-    # TODO
+    test_gmm()
