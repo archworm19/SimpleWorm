@@ -1,20 +1,19 @@
 """Clustering Tools
 """
-from dis import dis
-from ntpath import join
 import numpy as np
 import numpy.random as npr
 import numpy.linalg as nplg
 
-class KMeans:
+class wKMeans:
+    """Weighted Kmeans"""
 
     def __init__(self, num_means: int):
         self.num_means = num_means
         self.rng = npr.default_rng(42)
 
     def assign_iter(self,
-                     means: np.ndarray,
-                     dat: np.ndarray):
+                    means: np.ndarray,
+                    dat: np.ndarray):
         """Single KMeans assignment iteration
 
         Args:
@@ -69,7 +68,8 @@ class KMeans:
     
     def _update_iter(self,
                      dat: np.ndarray,
-                     clust_assigns: np.ndarray):
+                     clust_assigns: np.ndarray,
+                     priors: np.ndarray):
         """Single KMeans update iteration
 
         Args:
@@ -77,17 +77,20 @@ class KMeans:
                 representing data samples
             clust_assigns (np.ndarray): len num_sample
                 array of sample indices
+            priors (np.ndarray): prior probabilities
+                = len num_sample array
         """
         # sort in order of cluster assignments
         sinds = np.argsort(clust_assigns)
-        clust_assigns = clust_assigns[sinds]
-        dat = dat[sinds]
         # split across clusters
-        _, uniqinds = np.unique(clust_assigns, return_index=True)
-        dgrps = np.split(dat, uniqinds)[1:]
+        _, uniqinds = np.unique(clust_assigns[sinds], return_index=True)
+        dgrps = np.split(sinds, uniqinds)[1:]
         means, grp_size = [], []
         for dgrp in dgrps:
-            means.append(np.mean(dgrp, axis=0))
+            # normalize priors within cluster
+            cprior = priors[dgrp]
+            weights = cprior / np.sum(cprior)
+            means.append(np.sum(dat[dgrp] * weights[:,None], axis=0))
             grp_size.append(len(dgrp))
         # deal with cluster loss
         if len(means) < self.num_means:
@@ -110,41 +113,61 @@ class KMeans:
         self.rng.shuffle(inds)
         return dat[inds[:self.num_means]]
     
-    def run(self, dat: np.ndarray, num_iter: int = 5):
+    def run(self,
+            dat: np.ndarray,
+            priors: np.ndarray,
+            num_iter: int = 5):
         """Single KMean runs
 
         Args:
             dat (np.ndarray): raw data
+            priors(np.ndarray): prior probabilities
+                = len num_sample array
             num_iter (int): number of iterations
         
         Returns:
+            np.ndarray: means
+                num_mean x N
+            np.ndarray: distance matrix
+                num_means x num_sample
         """
         means = self._init_means(dat)
         for _ in range(num_iter):
             clust_assigns, _ = self.assign_iter(means, dat)
-            means = self._update_iter(dat, clust_assigns)
+            means = self._update_iter(dat, clust_assigns, priors)
         _, dist_mat = self.assign_iter(means, dat)
         return means, dist_mat
     
     def multi_run(self,
                   dat: np.ndarray,
+                  priors: np.ndarray,
                   num_iter: int = 5,
                   num_run: int = 3):
         """Run KMeans from different starting points
 
         Args:
             dat (np.ndarray): raw data
+            priors (np.ndarray): prior probabilities
+                on raw data = len num_sample array
             num_iter (int, optional):
             num_run (int, optional):
+        
+        Returns:
+            np.ndarray: means
+                num_mean x N
+            np.ndarray: distance matrix
+                num_mean x num_sample
         """
-        min_dist, means = None, None
+        assert(np.sum(priors) == 1), "priors must sum to 1"
+        min_dist, means, dists = None, None, None
         for _ in range(num_run):
-            cmeans, dists = self.run(dat, num_iter)
-            cdist = np.mean(np.argmin(dists, axis=1))
+            cmeans, cdists = self.run(dat, priors, num_iter)
+            cdist = np.mean(np.argmin(cdists, axis=1))
             if min_dist is None or cdist < min_dist:
                 min_dist = cdist
                 means = cmeans
-        return means
+                dists = cdist
+        return means, dists
 
 class wGMM:
     """Weighted Gaussian Mixture Modeling
@@ -162,36 +185,7 @@ class wGMM:
         self.num_means = num_means
         self.tolerance = tolerance
         self.rng = npr.default_rng(66)
-        self.km = KMeans(num_means)
-
-    def _calc_covar(self,
-                    dat: np.ndarray,
-                    means: np.ndarray):
-        """Calculate covariance matrices
-
-        Args:
-            dat (np.ndarray): num_sample x N
-                array of raw data samples
-            means (np.ndarray): num_mean x N
-                set of means
-        
-        Returns:
-            np.ndarray: num_means x N x N
-                covariance matrices for each mean
-                order-matched to input
-            np.ndarray: num_mean x num_sample x N
-                differences (x - mu)
-                where x = data
-                mu = means
-        """
-        # subtract means
-        # --> num_mean x num_sample x N
-        di = dat[None] - means[:, None]
-        # calc each covariance matrix
-        # --> num_mean x N x N
-        covars = np.mean(di[:,:,None] * di[:,:,:,None],
-                         axis=1)
-        return covars, di
+        self.km = wKMeans(num_means)
 
     def _decompose_covar(self, covar_mat: np.ndarray):
         """SVD decomposition of covariance matrix
@@ -272,10 +266,9 @@ class wGMM:
         return num / denom
 
     def probs(self,
-              means: np.ndarray,
+              raw_diff: np.ndarray,
               precisions: np.ndarray,
               cov_dets: np.ndarray,
-              dat: np.ndarray,
               priors: np.ndarray):
         """Single GMM probability iteration
         == assignment
@@ -283,55 +276,133 @@ class wGMM:
                                     sum(P(sample | cluster))
 
         Args:
-            means (np.ndarray): num_means x N
-                array representing means
-            cov_dets (np.ndarray): covariance
-                determinants = len num_mean
+            raw_diff (np.ndarray): x - mu
+                num_mean x num_sample x N
             precisions (np.ndarray): inverse of covariance
                 matrices = num_means x N x N
+            cov_dets (np.ndarray): covariance
+                determinants = len num_mean
             dat (np.ndarray): num_sample x N
                 array representing data samples
             priors (np.ndarray): prior probs
                 = len num_sample
         
         Returns:
+            np.ndarray: posterior probabilities
+                num_mean x num_sample array
+            np.ndarray: joint probabilities
+                num_mean x num_sample array
+            np.ndarray: forward probabilities
+                num_mean x num_sample array
         """
-        # subtract means
-        # --> num_mean x num_sample x N
-        di = dat[None] - means[:, None]
         # forward probs
         fprobs = []
         for i, cov_det in enumerate(cov_dets):
-            fprobs.append(self._apply_gaussian(di[i], precisions[i], cov_det))
+            fprobs.append(self._apply_gaussian(raw_diff[i], precisions[i], cov_det))
         # --> num_mean x num_sample
         fprobs = np.array(fprobs)
-        # TODO: posterior probs
+        # posterior probs
         joint_probs = fprobs * priors[None]
         post_probs = joint_probs / np.sum(joint_probs,
                                           axis=0, keepdims=True)
         return post_probs, joint_probs, fprobs
 
+    def update(self, dat: np.ndarray, post_probs: np.ndarray):
+        """Update Step of WGMM
+        Calculate new means, covariances
+
+        Args:
+            dat (np.ndarray): raw data
+                num_samples x N array
+            post_probs (np.ndarray): posterior
+                probabilities
+                num_mean x num_sample array
+        
+        Returns:
+            np.ndarray: weighted mean
+                num_mean x N
+            np.ndarray: weighted covariance
+                num_mean x N x N
+            np.ndarray: raw difference x - mu
+                num_mean x num_sample x N
+        """
+
+        # weighted means:
+        # --> num_mean x N
+        wmeans = np.sum(post_probs[:,:,None] * dat[None],
+                        axis=1)
+        
+        # calculate raw difference:
+        # --> num_mean x num_sample x N
+        raw_diff = dat[None] - wmeans[:, None]
+
+        # weighted covariance:
+        # outp = num_mean x num_sample x N x N
+        outp = raw_diff[:,:,None] * raw_diff[:,:,:,None]
+        # contract along samples:
+        # --> num_mean x N x N
+        wcov = np.sum(post_probs[:,:,None,None] * outp,
+                      axis = 1)
+
+        return wmeans, wcov, raw_diff
+    
+    def run(self,
+            dat: np.ndarray,
+            priors: np.ndarray,
+            num_iter: int = 5):
+
+        # init with kmeans:
+        # --> means = num_mean x N
+        # --> dist_mat = num_mean x num_sample
+        _, dist_mat = self.km.multi_run(dat, priors, num_iter, 2)
+        # posterior estimate based on distance matrix:
+        # TODO: use prior
+        edist = np.exp(-.5 * dist_mat)
+        posts = edist / np.sum(edist, axis=0, keepdims=True)
+
+        # repeated iterations of 
+        # > means / covariance updates
+        # > posterior probability calc
+        means, covars = None, None
+        for _ in range(num_iter):
+            means, covars, raw_diff = self.update(dat, posts)
+
+            # decompose each covariance matrix
+            # --> precision and determinant simul calc
+            precisions, cov_dets = [], []
+            for i in range(np.shape(covars)[0]):
+                prec, covd = self._decompose_covar(covars[i])
+                precisions.append(prec)
+                cov_dets.append(covd)
+
+            self.probs(raw_diff, np.array(precisions), np.array(cov_dets),
+                        priors)
+        
+        return means, covars, posts
+
+
 
 # TESTING
 
 def test_kmeans():
-    km = KMeans(2)
+    km = wKMeans(2)
     dat = np.array([[1, 1, 1, 1],
                     [2, 2, 2, 2],
                     [100, 100, 100, 100],
                     [101, 100, 101, 99]])
-    means, dist_mat = km.run(dat)
+    priors = np.ones((4,)) / 4.
+    means, dist_mat = km.run(dat, priors)
     print(means)
     print(dist_mat)
-    means = km.multi_run(dat)
+    means, _ = km.multi_run(dat, priors)
     print(means)
 
     # more kmeans testing
-    rng = npr.default_rng(0)
     v1 = npr.rand(10, 2)
-    v2 = npr.rand(15, 2) + .5 * np.ones((15, 2))
+    v2 = npr.rand(15, 2) + .9 * np.ones((15, 2))
+    priors = np.ones((25,)) / 25.
     dat = np.vstack((v1, v2))
-    means = km.multi_run(dat)
+    means, _ = km.multi_run(dat, priors)
     print(means)
     print(km.assign_iter(means, dat))
     plt.figure()
@@ -369,8 +440,9 @@ def test_gmm():
         print('determinant check')
         print(nplg.det(np.array(cov)))
         print(cov_det)
-        pr = G.probs(np.array(mu)[None], np.array(precision)[None], np.array(cov_det)[None],
-                    np.array(dat)[None], np.array([[1.]]))
+        raw_diff = np.array(dat)[None,None] - np.array(mu)[None, None]
+        pr = G.probs(raw_diff, np.array(precision)[None], np.array(cov_det)[None],
+                     np.array([[1.]]))
         print('iter; probs')
         print(var.pdf(dat))
         print(pr)
@@ -382,7 +454,7 @@ if __name__ == '__main__':
     import pylab as plt
 
     # kmeans testing
-    # dat, means = test_kmeans()
+    test_kmeans()
 
     # wGMM testing
-    test_gmm()
+    #test_gmm()
