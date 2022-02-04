@@ -265,15 +265,20 @@ class wGMM:
                          * cov_det)
         return num / denom
 
+    # TODO: there's a confusion as to
+    # what's meant by prior
+    # Priors i'm referring to
+    # = weights for datapoints
+    # ... not assignment priors!
+    # TODO: where do pt_weights come in?
+
     def probs(self,
               raw_diff: np.ndarray,
               precisions: np.ndarray,
               cov_dets: np.ndarray,
-              priors: np.ndarray):
+              mixing_coeffs: np.ndarray):
         """Single GMM probability iteration
         == assignment
-        P(cluster | sample) = P(sample | cluster) P(cluster) /
-                                    sum(P(sample | cluster))
 
         Args:
             raw_diff (np.ndarray): x - mu
@@ -282,10 +287,9 @@ class wGMM:
                 matrices = num_means x N x N
             cov_dets (np.ndarray): covariance
                 determinants = len num_mean
-            dat (np.ndarray): num_sample x N
-                array representing data samples
-            priors (np.ndarray): prior probs
-                = len num_sample
+            mixing_coeffs (np.ndarray): coefficients
+                for each guassian (height of gauss)
+                = len num_mean array
         
         Returns:
             np.ndarray: posterior probabilities
@@ -301,13 +305,20 @@ class wGMM:
             fprobs.append(self._apply_gaussian(raw_diff[i], precisions[i], cov_det))
         # --> num_mean x num_sample
         fprobs = np.array(fprobs)
-        # posterior probs
-        joint_probs = fprobs * priors[None]
-        post_probs = joint_probs / np.sum(joint_probs,
-                                          axis=0, keepdims=True)
-        return post_probs, joint_probs, fprobs
 
-    def update(self, dat: np.ndarray, post_probs: np.ndarray):
+        # multiply forward probs by mixing_coeffs
+        # --> mixing_probs
+        # --> num_mean x num_sample
+        mixing_probs = mixing_coeffs[:, None] * fprobs
+
+        # posterior probs
+        # normalizes mixing probs within cluster:
+        post_probs = mixing_probs / np.sum(mixing_probs,
+                                           axis=0, keepdims=True)
+        return post_probs, mixing_probs, fprobs
+
+    def update(self, dat: np.ndarray, post_probs: np.ndarray,
+                raw_diff: np.ndarray):
         """Update Step of WGMM
         Calculate new means, covariances
 
@@ -317,41 +328,41 @@ class wGMM:
             post_probs (np.ndarray): posterior
                 probabilities
                 num_mean x num_sample array
+            raw_diff (np.ndarray): raw difference
+                from previous step... will 
+                be updated here
         
         Returns:
-            np.ndarray: weighted mean
+            np.ndarray: updated mean
                 num_mean x N
-            np.ndarray: weighted covariance
+            np.ndarray: updated covariance
                 num_mean x N x N
-            np.ndarray: raw difference x - mu
-                num_mean x num_sample x N
+            np.ndarray: updated mixing coeffs
+                len = num_mena
         """
-
-        # TODO: is this right???
-        # sinkhorn style..
-
+        # M-Step:
         # convert posteriors to weights:
         weights = post_probs / np.sum(post_probs, axis=1,
                                       keepdims=True)
 
-        # weighted means:
+        # update mixing_coeffs:
+        # --> num_mean
+        mix_coeffs = np.sum(post_probs, axis=1)
+
+        # update means:
         # --> num_mean x N
-        wmeans = np.sum(weights[:,:,None] * dat[None],
+        means = np.sum(weights[:,:,None] * dat[None],
                         axis=1)
         
-        # calculate raw difference:
-        # --> num_mean x num_sample x N
-        raw_diff = dat[None] - wmeans[:, None]
-
-        # weighted covariance:
+        # update covariance:
         # outp = num_mean x num_sample x N x N
         outp = raw_diff[:,:,None] * raw_diff[:,:,:,None]
         # contract along samples:
         # --> num_mean x N x N
-        wcov = np.sum(weights[:,:,None,None] * outp,
+        cov = np.sum(weights[:,:,None,None] * outp,
                       axis = 1)
-
-        return wmeans, wcov, raw_diff
+    
+        return means, cov, mix_coeffs
     
     def run(self,
             dat: np.ndarray,
@@ -379,20 +390,32 @@ class wGMM:
         # init with kmeans:
         # --> means = num_mean x N
         # --> dist_mat = num_mean x num_sample
-        _, dist_mat = self.km.multi_run(dat, priors, num_iter, 2)
+        means, dist_mat = self.km.multi_run(dat, priors, num_iter, 2)
         # posterior estimate based on distance matrix:
         edist = np.exp(-2. * dist_mat) * priors[None]
         posts = edist / np.sum(edist, axis=0, keepdims=True)
 
+        # update raw difference
+        # calculate raw difference:
+        # --> num_mean x num_sample x N
+        raw_diff = dat[None] - means[:, None]
+
         # repeated iterations of 
         # > means / covariance updates
         # > posterior probability calc
-
         plt.figure()
 
         means, covars = None, None
         for _ in range(num_iter):
-            means, covars, raw_diff = self.update(dat, posts)
+            means, covars, mix_coeffs = self.update(dat, posts, raw_diff)
+
+            print('mixing coeffs')
+            print(mix_coeffs)
+
+            # update raw difference
+            # calculate raw difference:
+            # --> num_mean x num_sample x N
+            raw_diff = dat[None] - means[:, None]
 
             plt.scatter(means[:, 0], means[:, 1])
 
@@ -405,12 +428,21 @@ class wGMM:
                 cov_dets.append(covd)
 
             posts, _, _ = self.probs(raw_diff, np.array(precisions), np.array(cov_dets),
-                                     priors)
+                                     mix_coeffs)
         
         plt.show()
         
         return means, covars, posts
 
+
+        # TODO: how do you factor in priors?
+        # > don't matter for forward probabilities
+        # > do they matter for gamma / posteriors?
+        # > > normalize across means
+        # > > they do NOT matter (unlike mixing coeffs)
+        # > > cuz will just be a scalar that pops out of sums
+        # > > TODO: do this math out!
+        # > They definitely factor in to updates!
 
 
 # TESTING
