@@ -158,7 +158,7 @@ class wKMeans:
             np.ndarray: distance matrix
                 num_mean x num_sample
         """
-        assert(np.sum(priors) == 1), "priors must sum to 1"
+        assert(np.fabs(np.sum(priors) - 1) < 1e-4), "priors must sum to 1"
         min_dist, means, dmz = None, None, None
         for _ in range(num_run):
             cmeans, dist_mat = self.run(dat, priors, num_iter)
@@ -221,6 +221,28 @@ class wGMM:
 
         return precision, det
     
+    def _decompose_all_covars(self, covars: np.ndarray):
+        """Decompose all covariance matrices
+
+        Args:
+            covar_mats (np.ndarray): covariances matrices
+                num_mean x N x N array
+        
+        Returns:
+            np.ndarray: precision matrices (covar inverses)
+                num_mean x N x N array
+            np.ndarray: covariance determinants
+                len num_mean array
+        """
+        # decompose each covariance matrix
+        # --> precision and determinant simul calc
+        precisions, cov_dets = [], []
+        for i in range(np.shape(covars)[0]):
+            prec, covd = self._decompose_covar(covars[i])
+            precisions.append(prec)
+            cov_dets.append(covd)
+        return np.array(precisions), np.array(cov_dets)
+    
     def _mmult(self,
                A: np.ndarray,
                B: np.ndarray,
@@ -256,21 +278,26 @@ class wGMM:
         Returns:
             np.ndarray: forward probs = len num_sample
         """
+
+        # TODO: tolerance stuff
+
         dim = np.shape(di)[1]
         m = self._mmult(di, precision, di)
         # numerator --> num_sample
         num = np.exp(-.5 * m)
+
+
         # denom --> float
         denom = np.sqrt(((2. * np.pi)**dim)
                          * cov_det)
-        return num / denom
 
-    # TODO: there's a confusion as to
-    # what's meant by prior
-    # Priors i'm referring to
-    # = weights for datapoints
-    # ... not assignment priors!
-    # TODO: where do pt_weights come in?
+        print('TOLERANCE')
+        print(m)
+        print(num)
+        print(denom)
+        input('cont?')
+
+        return num / denom
 
     def probs(self,
               raw_diff: np.ndarray,
@@ -294,7 +321,9 @@ class wGMM:
         Returns:
             np.ndarray: posterior probabilities
                 num_mean x num_sample array
-            np.ndarray: joint probabilities
+            np.ndarray: mixing probabilities
+                forward probabilities scaled by
+                mixing coefficients (gaussian mags)
                 num_mean x num_sample array
             np.ndarray: forward probabilities
                 num_mean x num_sample array
@@ -311,6 +340,12 @@ class wGMM:
         # --> num_mean x num_sample
         mixing_probs = mixing_coeffs[:, None] * fprobs
 
+        print('mixing probs')
+        print(mixing_coeffs)
+        print(fprobs)
+        print(mixing_probs)
+        input('WTFHELL?')
+
         # posterior probs
         # normalizes mixing probs within cluster:
         post_probs = mixing_probs / np.sum(mixing_probs,
@@ -318,7 +353,7 @@ class wGMM:
         return post_probs, mixing_probs, fprobs
 
     def update(self, dat: np.ndarray, post_probs: np.ndarray,
-                raw_diff: np.ndarray):
+                raw_diff: np.ndarray, priors: np.ndarray):
         """Update Step of WGMM
         Calculate new means, covariances
 
@@ -331,6 +366,9 @@ class wGMM:
             raw_diff (np.ndarray): raw difference
                 from previous step... will 
                 be updated here
+            priors (np.ndarray): prior probabilities
+                on datapoints = weights for datapoints
+                = len num_sample array
         
         Returns:
             np.ndarray: updated mean
@@ -341,9 +379,12 @@ class wGMM:
                 len = num_mena
         """
         # M-Step:
-        # convert posteriors to weights:
-        weights = post_probs / np.sum(post_probs, axis=1,
-                                      keepdims=True)
+        # weight creation:
+        # > mult posteriors by priors
+        # > normalize
+        raw_weights = post_probs * priors[None]
+        weights = raw_weights / np.sum(raw_weights, axis=1,
+                                       keepdims=True)
 
         # update mixing_coeffs:
         # --> num_mean
@@ -395,6 +436,10 @@ class wGMM:
         edist = np.exp(-2. * dist_mat) * priors[None]
         posts = edist / np.sum(edist, axis=0, keepdims=True)
 
+        print('inits')
+        print(dist_mat)
+        input('INITS?')
+
         # update raw difference
         # calculate raw difference:
         # --> num_mean x num_sample x N
@@ -403,138 +448,58 @@ class wGMM:
         # repeated iterations of 
         # > means / covariance updates
         # > posterior probability calc
-        plt.figure()
-
-        means, covars = None, None
+        means, covars, mix_coeffs = None, None, None
         for _ in range(num_iter):
-            means, covars, mix_coeffs = self.update(dat, posts, raw_diff)
-
-            print('mixing coeffs')
-            print(mix_coeffs)
+            means, covars, mix_coeffs = self.update(dat, posts, raw_diff,
+                                                    priors)
 
             # update raw difference
             # calculate raw difference:
             # --> num_mean x num_sample x N
             raw_diff = dat[None] - means[:, None]
 
-            plt.scatter(means[:, 0], means[:, 1])
-
             # decompose each covariance matrix
             # --> precision and determinant simul calc
-            precisions, cov_dets = [], []
-            for i in range(np.shape(covars)[0]):
-                prec, covd = self._decompose_covar(covars[i])
-                precisions.append(prec)
-                cov_dets.append(covd)
+            precisions, cov_dets = self._decompose_all_covars(covars)
 
-            posts, _, _ = self.probs(raw_diff, np.array(precisions), np.array(cov_dets),
+            posts, _, _ = self.probs(raw_diff, precisions, cov_dets,
                                      mix_coeffs)
         
-        plt.show()
-        
-        return means, covars, posts
-
-
-        # TODO: how do you factor in priors?
-        # > don't matter for forward probabilities
-        # > do they matter for gamma / posteriors?
-        # > > normalize across means
-        # > > they do NOT matter (unlike mixing coeffs)
-        # > > cuz will just be a scalar that pops out of sums
-        # > > TODO: do this math out!
-        # > They definitely factor in to updates!
-
-
-# TESTING
-
-def test_kmeans():
-    km = wKMeans(2)
-    dat = np.array([[1, 1, 1, 1],
-                    [2, 2, 2, 2],
-                    [100, 100, 100, 100],
-                    [101, 100, 101, 99]])
-    priors = np.ones((4,)) / 4.
-    means, dist_mat = km.run(dat, priors)
-    print(means)
-    print(dist_mat)
-    means, _ = km.multi_run(dat, priors)
-    print(means)
-
-    # more kmeans testing
-    v1 = npr.rand(10, 2)
-    v2 = npr.rand(15, 2) + .9 * np.ones((15, 2))
-    priors = np.ones((25,)) / 25.
-    dat = np.vstack((v1, v2))
-    means, _ = km.multi_run(dat, priors)
-    print(means)
-    print(km.assign_iter(means, dat))
-    plt.figure()
-    plt.scatter(dat[:,0], dat[:,1])
-    plt.scatter(means[:,0], means[:,1], c='r')
-    plt.show()
-
-    return dat, means
-
-def test_gmm():
-    # NOTE: need scipy to run test
-    # more specific testing:
-    print('GMM testing')
-    G = wGMM(2)
-
-    # mmult ~ guarantees right order calc
-    print('mmult test')
-    G._mmult(npr.rand(20, 5),
-             npr.rand(5, 8),
-             npr.rand(20, 8))
-
-    from scipy.stats import multivariate_normal
-    for _ in range(3):
-        mu = npr.rand(4)
-        cov_raw = npr.rand(4, 4)
-        cov = 5 * cov_raw @ cov_raw.T
-        print(cov)
-        print(nplg.eig(cov))
-        dat = npr.rand(4)
-        var = multivariate_normal(mean=mu, cov=cov)
-        # compare against ours:
-        precision, cov_det = G._decompose_covar(np.array(cov))
-        print('precision check: should be identity')
-        print(np.array(cov) @ precision)
-        print('determinant check')
-        print(nplg.det(np.array(cov)))
-        print(cov_det)
-        raw_diff = np.array(dat)[None,None] - np.array(mu)[None, None]
-        pr = G.probs(raw_diff, np.array(precision)[None], np.array(cov_det)[None],
-                     np.array([[1.]]))
-        print('iter; probs')
-        print(var.pdf(dat))
-        print(pr)
-        input('cont?')
+        return means, covars, mix_coeffs, posts
     
-    # more testing
-    v1 = npr.rand(10, 2)
-    v2 = npr.rand(15, 2) + .9 * np.ones((15, 2))
-    priors = np.ones((25,)) / 25.
-    dat = np.vstack((v1, v2))
-    means, covars, posts = G.run(dat, priors)
-    print('means')
-    print(means)
-    print('covars')
-    print(covars)
-    print('posteriors')
-    print(posts)
-    plt.figure()
-    plt.scatter(dat[:,0], dat[:,1])
-    plt.scatter(means[:,0], means[:,1])
-    plt.show()
+    def log_like(self,
+                 means: np.ndarray,
+                 covars: np.ndarray,
+                 mixing_coeffs: np.ndarray,
+                 priors: np.ndarray,
+                 dat: np.ndarray):
+        """Weighted Log-Likelihood calculation
+        Standard log-likelihood, weighted by priors
 
+        Args:
+            means (np.ndarray): means for each cluster
+                num_mean x N
+            covars (np.ndarray): covariance matrices
+                for each cluster
+                num_mean x N x N
+            mixing_coeffs (np.ndarray): mixing coefficients
+                = scaling coeffs for each gaussian
+                len num_mean
+            priors (np.ndarray): sample priors
+                = sample weights
+                len num_sample
+            dat (np.ndarray): raw data
+                num_sample x N
 
-
-if __name__ == '__main__':
-    import pylab as plt
-
-    # kmeans testing
-    #test_kmeans()
-
-    # wGMM testing
-    test_gmm()
+        Returns:
+            float: log-likelihood
+        """
+        raw_diff = dat[None] - means[:, None]
+        precisions, cov_dets = self._decompose_all_covars(covars)
+        # mixing probs = num_mean x num_sample array
+        _, mixing_probs, _ = self.probs(raw_diff, precisions, cov_dets, mixing_coeffs)
+        # log sum within each cluster:
+        # --> len num_sample
+        logsum = np.log(np.sum(mixing_probs, axis=0))
+        # scale by sample weights for final calc:
+        return np.sum(priors * logsum)
