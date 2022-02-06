@@ -106,7 +106,7 @@ def test_gmm():
     v4[:,1] = v4[:,1] - 1.
     # priors
     wdiag = 1. * np.ones((10,))
-    woff = 0.0 * np.ones((20,))
+    woff = 0.01 * np.ones((20,))
     priors = np.hstack((wdiag, woff, wdiag, woff))
     priors = priors / np.sum(priors)
     # dat construction

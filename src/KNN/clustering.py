@@ -285,18 +285,9 @@ class wGMM:
         m = self._mmult(di, precision, di)
         # numerator --> num_sample
         num = np.exp(-.5 * m)
-
-
         # denom --> float
         denom = np.sqrt(((2. * np.pi)**dim)
                          * cov_det)
-
-        print('TOLERANCE')
-        print(m)
-        print(num)
-        print(denom)
-        input('cont?')
-
         return num / denom
 
     def probs(self,
@@ -339,13 +330,6 @@ class wGMM:
         # --> mixing_probs
         # --> num_mean x num_sample
         mixing_probs = mixing_coeffs[:, None] * fprobs
-
-        print('mixing probs')
-        print(mixing_coeffs)
-        print(fprobs)
-        print(mixing_probs)
-        input('WTFHELL?')
-
         # posterior probs
         # normalizes mixing probs within cluster:
         post_probs = mixing_probs / np.sum(mixing_probs,
@@ -385,7 +369,6 @@ class wGMM:
         raw_weights = post_probs * priors[None]
         weights = raw_weights / np.sum(raw_weights, axis=1,
                                        keepdims=True)
-
         # update mixing_coeffs:
         # --> num_mean
         mix_coeffs = np.sum(post_probs, axis=1)
@@ -435,11 +418,6 @@ class wGMM:
         # posterior estimate based on distance matrix:
         edist = np.exp(-2. * dist_mat) * priors[None]
         posts = edist / np.sum(edist, axis=0, keepdims=True)
-
-        print('inits')
-        print(dist_mat)
-        input('INITS?')
-
         # update raw difference
         # calculate raw difference:
         # --> num_mean x num_sample x N
@@ -452,7 +430,6 @@ class wGMM:
         for _ in range(num_iter):
             means, covars, mix_coeffs = self.update(dat, posts, raw_diff,
                                                     priors)
-
             # update raw difference
             # calculate raw difference:
             # --> num_mean x num_sample x N

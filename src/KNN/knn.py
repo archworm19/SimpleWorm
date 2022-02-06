@@ -2,17 +2,21 @@
 
 """
 import numpy as np
+from clustering import wGMM
 
 # TODO: model interface?
 class KNN:
 
     def __init__(self,
                  k: int,
+                 num_means: int,
                  variances: np.ndarray):
         """KNN initiation
 
         Args:
             k (int): number of neighbors to use
+            num_means (int): number of means to
+                use in GMM
             variances (np.ndarray): Scale specific dimensions to
                 increase or decrease
                 their impact (increase --> stronger influence on selection)
@@ -22,16 +26,7 @@ class KNN:
         self.k = k
         self.variances = variances
         self.datastore = None
-
-
-    # TODO: figure out interface
-    # TODO: get imports right
-    def train_epoch(self, sampler):
-        # pull all samples
-        num_samples = sampler.get_sample_size()
-        dat_t, dat_id = sampler.pull_samples(num_samples)
-        # save flattened indep and dep variables:
-        self.train_indep_dat, self.train_dep_dat = sampler.flatten_samples(dat_t, dat_id)
+        self.gmm = wGMM(num_means)
 
 
     # TODO alg
@@ -46,6 +41,7 @@ class KNN:
 
     def _calc_weighted_dists(self,
                              indep_sample: np.ndarray,
+                             full_indep_set: np.ndarray,
                              variance_i: np.ndarray):
         """Calculate the weighted distances between 1 sample
         of indepenent dims and all of training independent samples.
@@ -53,6 +49,8 @@ class KNN:
 
         Args:
             indep_sample (np.ndarray): len N sample of independent dims
+            full_indep_set (np.ndarray): full set of independent samples
+                num_sample x N
             variance_i (np.ndarray): len N array representing single
                 variance entry
 
@@ -60,7 +58,7 @@ class KNN:
             np.ndarray: len [num training samples] array of weighted
                 distance = exp(-1 * sum((indep_sample - train_sample)^2 / variance_i))
         """
-        raw_diff = (self.train_indep_dat - indep_sample[None])**2.
+        raw_diff = (full_indep_set - indep_sample[None])**2.
         quot = -1. * np.sum(raw_diff * (1. / variance_i[None]), axis=1)
         return np.exp(quot)
     
@@ -97,22 +95,41 @@ class KNN:
             colours[st:ed] = 1
         return np.array(ret_inds)
 
-    # TODO: this should perhaps be a different class
-    # yeah: probs
-    def wGMM(self, dep_dat: np.ndarray, priors: np.ndarray):
-        """weighted Gaussian Mixture Model
+    def _fit_1sample(self,
+                     indep_sample: np.ndarray,
+                     full_indep: np.ndarray,
+                     variance_i: np.ndarray):
+        """Fit 1 sample for 1 variance set
 
         Args:
-            dep_dat (np.ndarray): N x m array of dependent data
-            priors (np.ndarray): len N array of priors or weighted
-                for the corresponding dep_dat entries
+            indep_sample (np.ndarray): single sample
+                of independent variables
+                len N array
+            full_indep (np.ndarray): set of all
+                samples of independent variables
+                num_sample x N
+            variances (np.ndarray): single variance
+                set
+                len N array
+
         """
-        # > initialize with Kmeans
-        # > Repeated cycles (EM)
-        # > > Prob that each sample belongs to given cluster
-        # > > Reweight these probs using priors ~ can just mult (cuz will renorm after)
-        # > > Normalize probs within cluster (Bayes law application --> P(clust | samples))
-        # > > Calculate weighted means and covars for each cluster
+        # weighted distance:
+        wdist = self._calc_weighted_dists(indep_sample,
+                                          full_indep,
+                                          variance_i)
+        # TODO; complete
+
+
+
+    # TODO: figure out interface
+    # TODO: get imports right
+    def train_epoch(self, sampler):
+        # pull all samples
+        num_samples = sampler.get_sample_size()
+        dat_t, dat_id = sampler.pull_samples(num_samples)
+        # save flattened indep and dep variables:
+        self.train_indep_dat, self.train_dep_dat = sampler.flatten_samples(dat_t, dat_id)
+        # TODO: figure out correct variance!!!
 
 
     # TODO: training for 1 sample
