@@ -97,15 +97,16 @@ class SmallSampler(sampler_iface.Sampler):
                 identity indicator data
                 Ex: what worm is this coming from?
         """
-        batch, ident_batch = [], []
+        batch, ident_batch, rwindow_starts = [], [], []
         for i in range(self.next_sample, min(self.next_sample + num_samples,
                                              len(self.window_starts))):
             t0 = int(self.window_starts[i])
             batch.append(self.data[t0:t0+self.window_size])
             ident_batch.append(self.ident_dat[t0])
+            rwindow_starts.append(t0)
         # update sample ptr:
         self.next_sample += num_samples
-        return np.array(batch), np.array(ident_batch)
+        return np.array(batch), np.array(ident_batch), rwindow_starts
 
     def _fselection(self, num_sample: int, mask: np.ndarray):
         """ar_sample has multiple samples. Mask does not
@@ -179,7 +180,7 @@ class SmallSampler(sampler_iface.Sampler):
                 data shape
             np.ndarray: id data in original data shape
         """
-        # TODO: figure out what masks to use
+        # figure out what masks to use
         if indep:
             umasks = [self.indep_t_mask, self.indep_id_mask]
         else:
@@ -224,3 +225,6 @@ class SmallSampler(sampler_iface.Sampler):
 
     def get_sample_size(self):
         return len(self.window_starts)
+
+    def get_twindow_size(self):
+        return self.window_size
