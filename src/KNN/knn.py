@@ -114,6 +114,8 @@ class KNN:
                 set
                 len N array
 
+        TODO: return types
+
         """
         # weighted distance
         # --> len num_sample
@@ -144,6 +146,10 @@ class KNN:
         means, covars, mixing_coeffs, _ = self.gmm.run(dat, priors, self.num_iter)
         return means, covars, mixing_coeffs, priors, dat
 
+    # TODO: docstrings
+    # also: are these ok?
+    # passing around data makes more efficient BUT harder to use
+
     def _calc_log_like_train(self, means, covars, mixing_coeffs, priors, dep_dat):
         # TRAIN ASSUMPTION: with top match (assumed to be self) left out
         loglike = self.gmm.log_like(means, covars, mixing_coeffs, priors[1:], dep_dat[1:])
@@ -153,17 +159,41 @@ class KNN:
         loglike = self.gmm.log_like(means, covars, mixing_coeffs, priors, dep_dat)
         return means, covars, mixing_coeffs, loglike
 
-    # TODO: figure out interface
+    def _train_epoch_1var(self, indep_dat, dep_dat, window_starts,
+                            twindow_size, variance_i):
+        # TODO: complete training epoch for 1 variance
+        # TODO: averages log-like across dependent samples
+        # ... NOTE: only need training data
+        lls = []
+        for i in range(len(indep_dat)):
+            mu, sig, mixcoeff, priors, dat = self._fit_1sample(window_starts, twindow_size, indep_dat[i],
+                                indep_dat, dep_dat, variance_i)
+            tll = self._calc_log_like_train(mu, sig, mixcoeff, priors, dat)
+            lls.append(tll)
+        return np.mean(np.array(lls))
+
+    # TODO: figure out interface ~ mark as completed???
     # TODO: get imports right
-    def train_epoch(self, sampler):
+    def train_epoch(self, train_sampler):
+        # TODO: goal: figure out correct variance
+        # time window?
+        twindow_size = train_sampler.get_twindow_size()
         # pull all samples
-        num_samples = sampler.get_sample_size()
-        dat_t, dat_id = sampler.pull_samples(num_samples)
-        # save flattened indep and dep variables:
-        self.train_indep_dat, self.train_dep_dat = sampler.flatten_samples(dat_t, dat_id)
-        # TODO: figure out correct variance!!!
-
-
+        num_samples = train_sampler.get_sample_size()
+        dat_t, dat_id, window_starts = train_sampler.pull_samples(num_samples)
+        # flatten the data
+        train_indep_dat, train_dep_dat = train_sampler.flatten_samples(dat_t, dat_id)
+        best_ind, best_ll = None, None
+        for i, variance_i in enumerate(self.variances):
+            ll = self._train_epoch_1var(train_indep_dat, train_dep_dat, window_starts,
+                                        twindow_size, variance_i)
+            if ll > best_ll:
+                best_ind = i
+                best_ll = ll
+        # save as state
+        self.train_indep_dat = train_indep_dat
+        self.train_dep_dat = train_dep_dat
+        self.train_variance = self.variances[best_ind]
 
 
 def test_knn():
