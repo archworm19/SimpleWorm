@@ -146,24 +146,74 @@ class KNN:
         means, covars, mixing_coeffs, _ = self.gmm.run(dat, priors, self.num_iter)
         return means, covars, mixing_coeffs, priors, dat
 
-    # TODO: docstrings
-    # also: are these ok?
-    # passing around data makes more efficient BUT harder to use
+    def _calc_log_like_train(self, means: np.ndarray, covars: np.ndarray, 
+                             mixing_coeffs: np.ndarray, priors: np.ndarray,
+                             dep_dat: np.ndarray):
+        """Calculate training log-likelihood
+        TRAIN ASSUMPTION: with top match (assumed to be self) left out
+        Also: everything should be in the dependent variable space
+        Args:
+            means (np.ndarray): num_mean x N
+            covars (np.ndarray): num_mean x N x N
+            mixing_coeffs (np.ndarray): GMM mixing coefficients
+                = scales for the difference gaussian in the mixture
+                = len N array
+            priors (np.ndarray): normalized samples weights
+                = len num_sample array
+            dep_dat (np.ndarray): dependent variable values
+                for all samples
+                = num_sample x N array
 
-    def _calc_log_like_train(self, means, covars, mixing_coeffs, priors, dep_dat):
-        # TRAIN ASSUMPTION: with top match (assumed to be self) left out
-        loglike = self.gmm.log_like(means, covars, mixing_coeffs, priors[1:], dep_dat[1:])
-        return means, covars, mixing_coeffs, loglike
+        Returns:
+            float: log-likelihood with top match left out
+                ... assumes to be trivial mapping cuz training
+        """
+        p2 = priors[1:]
+        p2 = p2 / np.sum(p2)
+        loglike = self.gmm.log_like(means, covars, mixing_coeffs, p2, dep_dat[1:])
+        return loglike
 
     def _calc_log_like_test(self, means, covars, mixing_coeffs, priors, dep_dat):
-        loglike = self.gmm.log_like(means, covars, mixing_coeffs, priors, dep_dat)
-        return means, covars, mixing_coeffs, loglike
+        """Calculate test set log-likelihood
+        Also: everything should be in the dependent variable space
+        Args:
+            means (np.ndarray): num_mean x N
+            covars (np.ndarray): num_mean x N x N
+            mixing_coeffs (np.ndarray): GMM mixing coefficients
+                = scales for the difference gaussian in the mixture
+                = len N array
+            priors (np.ndarray): normalized samples weights
+                = len num_sample array
+            dep_dat (np.ndarray): dependent variable values
+                for all samples
+                = num_sample x N array
 
-    def _train_epoch_1var(self, indep_dat, dep_dat, window_starts,
-                            twindow_size, variance_i):
-        # TODO: complete training epoch for 1 variance
-        # TODO: averages log-like across dependent samples
-        # ... NOTE: only need training data
+        Returns:
+            float: log-likelihood
+        """
+        loglike = self.gmm.log_like(means, covars, mixing_coeffs, priors, dep_dat)
+        return loglike
+
+    def _train_epoch_1var(self, indep_dat: np.ndarray, dep_dat: np.ndarray,
+                          window_starts: np.ndarray, twindow_size: int,
+                          variance_i: np.ndarray):
+        """Single traininv epoch for single KNN variance
+
+        Args:
+            indep_dat (np.ndarray): all samples ~ independent variables
+                num_sample x N
+            dep_dat (np.ndarray): all samples ~ dependent variables
+                num_sample x M
+            window_starts (np.ndarray): window starts order matched
+                to (in)dep data
+                len num_sample array
+            twindow_size (int): size of each time window
+            variance_i (np.ndarray): single knn variance
+                len N array
+
+        Returns:
+            float: log-likelihood averaged across al test windows
+        """
         lls = []
         for i in range(len(indep_dat)):
             mu, sig, mixcoeff, priors, dat = self._fit_1sample(window_starts, twindow_size, indep_dat[i],
