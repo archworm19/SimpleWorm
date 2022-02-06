@@ -221,7 +221,7 @@ def test_anml():
     for v in [train_sampler, cross_sampler, test_sampler]:
         print('sampler object')
         print(v)
-        (dtseries, ident) = v.pull_samples(1000)
+        dtseries, ident, _ = v.pull_samples(1000)
         print('sampled time series')
         print(dtseries[:3])
         print('sampled identities')
