@@ -407,6 +407,8 @@ class wGMM:
                 num_mean x N array
             np.ndarray: covariance matrices
                 num_mean x N x N array
+            np.ndarray: mixing coeffs
+                len num_mean array
             np.ndarray: posterior probabilities
                 num_mean x num_sample array
         """

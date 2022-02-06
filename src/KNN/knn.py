@@ -8,13 +8,13 @@ from clustering import wGMM
 class KNN:
 
     def __init__(self,
-                 k: int,
                  num_means: int,
-                 variances: np.ndarray):
+                 variances: np.ndarray,
+                 num_iter = 5,
+                 weight_thresh = 0.99):
         """KNN initiation
 
         Args:
-            k (int): number of neighbors to use
             num_means (int): number of means to
                 use in GMM
             variances (np.ndarray): Scale specific dimensions to
@@ -23,27 +23,19 @@ class KNN:
                 Expected shape: num_parameter types x flattened independent 
                 variable dim
         """
-        self.k = k
+        assert(weight_thresh > 0.0 and weight_thresh < 1.), "weight thresh should be between 0 and 1"
         self.variances = variances
-        self.datastore = None
+        self.datastore = None  # TODO: delete?
+        self.num_iter = num_iter
+        self.weight_thresh = weight_thresh
+        self.num_means = num_means
         self.gmm = wGMM(num_means)
 
-
-    # TODO alg
-    # > Matrix distance calc
-    # > > N train samples x M test samples
-    # > Greedy neighbor finding
-    # > > Find closest entirely free window
-    # > > Colour window as used
-    # > > keep track of its weighted distance
-    # TODO: probably more space efficient
-    # to do one test sample at a time
-
-    def _calc_weighted_dists(self,
-                             indep_sample: np.ndarray,
-                             full_indep_set: np.ndarray,
-                             variance_i: np.ndarray):
-        """Calculate the weighted distances between 1 sample
+    def _calc_weights(self,
+                      indep_sample: np.ndarray,
+                      full_indep_set: np.ndarray,
+                      variance_i: np.ndarray):
+        """Calculate the weights between 1 sample
         of indepenent dims and all of training independent samples.
         IMPORTANT NOTE: return payload is NOT normalized
 
@@ -55,71 +47,105 @@ class KNN:
                 variance entry
 
         Returns:
-            np.ndarray: len [num training samples] array of weighted
-                distance = exp(-1 * sum((indep_sample - train_sample)^2 / variance_i))
+            np.ndarray: len [num training samples] array of weights
+                = exp(-1 * sum((indep_sample - train_sample)^2 / variance_i))
         """
         raw_diff = (full_indep_set - indep_sample[None])**2.
         quot = -1. * np.sum(raw_diff * (1. / variance_i[None]), axis=1)
         return np.exp(quot)
     
     def _select_nonolap_windows(self,
-                                wdists: np.ndarray,
+                                weights: np.ndarray,
                                 win_starts: np.ndarray,
                                 twindow_size: int):
         """Select non-overlapping windows according to
-        weighted distance (wdist) using Greedy strategy
+        weights (maximize) using Greedy strategy
 
         Arguments:
-            wdists (np.ndarray): len N array of weighted distances
+            weights (np.ndarray): len N array of weighted distances
             win_starts (np.ndarray): len N array of window starts
             twindow_size (int): size of each timewindow
 
         Returns:
             np.ndarray: indices (into wdists and win_starts)
                 of greedily chosen samples
+                in descending weight order
         """
         # initialize the colouring structure ~ use to guarantee no overlap
         minwin = int(np.amin(win_starts))
         maxwin = int(np.amax(win_starts))
-        colours = np.zeros(minwin, maxwin + twindow_size)
-        # iter thru wdists in sorted order (min dist best)
-        sinds = np.argsort(wdists)
+        colours = np.zeros((maxwin + twindow_size - minwin))
+        # iter thru wdists in reverse sorted order (large best)
+        sinds = np.argsort(weights)[::-1]
         ret_inds = []
         for ind in sinds:
             # check if overlaps with an already-used window
-            st = win_starts[ind]
-            ed = st + twindow_size
+            st = int(win_starts[ind] - minwin)
+            ed = int(st + twindow_size)
             if np.sum(colours[st:ed] > 0.5):
                 continue
             ret_inds.append(ind)
             colours[st:ed] = 1
         return np.array(ret_inds)
-
+    
     def _fit_1sample(self,
+                     win_starts: np.ndarray,
+                     twindow_size: float,
                      indep_sample: np.ndarray,
                      full_indep: np.ndarray,
+                     full_dep: np.ndarray,
                      variance_i: np.ndarray):
         """Fit 1 sample for 1 variance set
 
         Args:
+            win_starts (np.ndarray): len num_sample array of window starts
+            twindow_size (int): size of each timewindow
             indep_sample (np.ndarray): single sample
                 of independent variables
                 len N array
             full_indep (np.ndarray): set of all
                 samples of independent variables
                 num_sample x N
+            full_dep (np.ndarray): set of all
+                samples of dependent variables order
+                matched to full_dep
+                num_sample x M
             variances (np.ndarray): single variance
                 set
                 len N array
 
         """
-        # weighted distance:
-        wdist = self._calc_weighted_dists(indep_sample,
+        # weighted distance
+        # --> len num_sample
+        weights = self._calc_weights(indep_sample,
                                           full_indep,
                                           variance_i)
-        # TODO; complete
 
+        # indices into weights
+        select_inds = self._select_nonolap_windows(weights,
+                                                   win_starts,
+                                                   twindow_size)
+        
+        # safety check
+        # should only use datapoints with high priors
+        # low prior weights will practically make no difference
+        # and potentially cause instability
+        ord_weights = weights[select_inds]
+        cu_weights = np.cumsum(ord_weights) / np.sum(ord_weights)
+        # take either num_mean * 2 pts or where self.weight_thresh
+        # is crossed; max of these 2
+        bind = np.where(cu_weights >= self.weight_thresh)[0][0]
+        wind = min(max(bind, int(2 * self.num_means)), len(ord_weights)-1)
+        priors = ord_weights[:wind]
+        priors = priors / np.sum(priors)
 
+        # gmm run
+        dat = full_dep[select_inds[:wind]]
+        means, covars, mixing_coeffs, _ = self.gmm.run(dat, priors, self.num_iter)
+        # gmm likelihood
+        # ASSUMPTION: with top match (assumed to be self) left out
+        loglike = self.gmm.log_like(means, covars, mixing_coeffs, priors[1:], dat[1:])
+        return means, covars, mixing_coeffs, loglike
 
     # TODO: figure out interface
     # TODO: get imports right
@@ -132,9 +158,63 @@ class KNN:
         # TODO: figure out correct variance!!!
 
 
-    # TODO: training for 1 sample
-    # > calc weighted dist
-    # > select nonoverlapping windows
-    # > GMM
+
+
+def test_knn():
+    import numpy.random as npr
+    # variances are in indep space:
+    variances = np.array([[1., 1.], [0.1, 0.1]])
+
+    v1i = npr.rand(10,2) + np.ones((10,2))
+    v2i = npr.rand(20,2) - np.ones((20,2))
+    full_indeps = np.vstack((v1i, v2i))
+
+    knn = KNN(2, variances)
+
+    print('weights')
+    weights1 = knn._calc_weights(full_indeps[0], full_indeps, variances[0])
+    weights2 = knn._calc_weights(full_indeps[0], full_indeps, variances[1])
+    print(weights1)
+    print(weights2)
+
+    # window selection test:
+    w1ins = np.array([6*i for i in range(10)])
+    w2ins = np.array([200 + 6*i for i in range(20)])
+    win_starts = np.hstack((w1ins,w2ins))
+    # testing with complete non-overlap
+    sel1 = knn._select_nonolap_windows(weights1, win_starts, 6)
+    sel2 = knn._select_nonolap_windows(weights2, win_starts, 6)
+    # testing with overlap
+    sel2olap = knn._select_nonolap_windows(weights2, win_starts, 12)
+    print('olap select')
+    print(sel1)
+    print(sel2)
+    print(sel2olap)
+    print('corresponding weights')
+    print(weights1[sel1])
+    print(weights2[sel2olap])
+
+    # TODO: fit 1sample
+    v1d = npr.rand(10,2) + 2*np.ones((10,2))
+    v2d = npr.rand(20,2) - 2*np.ones((20,2))
+    full_deps = np.vstack((v1d, v2d))
+    # test with no overlap:
+    means, covars, mixing_coeffs, loglike = knn._fit_1sample(win_starts, 6, full_indeps[0],
+                                                          full_indeps, full_deps, variances[0])
+    print('fit1 no olap')
+    print(means)
+    print(mixing_coeffs)
+    print(loglike)
+    # test with overlap:
+    means, covars, mixing_coeffs, loglike = knn._fit_1sample(win_starts, 12, full_indeps[0],
+                                                          full_indeps, full_deps, variances[0])
+    print('fit2 olap')
+    print(means)
+    print(mixing_coeffs)
+    print(loglike)
+
+
+if __name__ == '__main__':
+    test_knn()
     
 
