@@ -139,12 +139,18 @@ class KNN:
         priors = ord_weights[:wind]
         priors = priors / np.sum(priors)
 
-        # gmm run
+        # gmm run on dependent dims
         dat = full_dep[select_inds[:wind]]
         means, covars, mixing_coeffs, _ = self.gmm.run(dat, priors, self.num_iter)
-        # gmm likelihood
-        # ASSUMPTION: with top match (assumed to be self) left out
-        loglike = self.gmm.log_like(means, covars, mixing_coeffs, priors[1:], dat[1:])
+        return means, covars, mixing_coeffs, priors, dat
+
+    def _calc_log_like_train(self, means, covars, mixing_coeffs, priors, dep_dat):
+        # TRAIN ASSUMPTION: with top match (assumed to be self) left out
+        loglike = self.gmm.log_like(means, covars, mixing_coeffs, priors[1:], dep_dat[1:])
+        return means, covars, mixing_coeffs, loglike
+
+    def _calc_log_like_test(self, means, covars, mixing_coeffs, priors, dep_dat):
+        loglike = self.gmm.log_like(means, covars, mixing_coeffs, priors, dep_dat)
         return means, covars, mixing_coeffs, loglike
 
     # TODO: figure out interface
@@ -199,19 +205,17 @@ def test_knn():
     v2d = npr.rand(20,2) - 2*np.ones((20,2))
     full_deps = np.vstack((v1d, v2d))
     # test with no overlap:
-    means, covars, mixing_coeffs, loglike = knn._fit_1sample(win_starts, 6, full_indeps[0],
+    means, covars, mixing_coeffs, _, _ = knn._fit_1sample(win_starts, 6, full_indeps[0],
                                                           full_indeps, full_deps, variances[0])
     print('fit1 no olap')
     print(means)
     print(mixing_coeffs)
-    print(loglike)
     # test with overlap:
-    means, covars, mixing_coeffs, loglike = knn._fit_1sample(win_starts, 12, full_indeps[0],
+    means, covars, mixing_coeffs, _, _ = knn._fit_1sample(win_starts, 12, full_indeps[0],
                                                           full_indeps, full_deps, variances[0])
     print('fit2 olap')
     print(means)
     print(mixing_coeffs)
-    print(loglike)
 
 
 if __name__ == '__main__':

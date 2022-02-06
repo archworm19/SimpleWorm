@@ -364,14 +364,18 @@ class wGMM:
         """
         # M-Step:
         # weight creation:
-        # > mult posteriors by priors
-        # > normalize
+        # p(X,Z) = p(Z | X)p(X)
+        # = posteriors * priors
+        # > raw_weights: mult posteriors by priors (num_mean x num_sample)
+        # > weights: normalize
         raw_weights = post_probs * priors[None]
         weights = raw_weights / np.sum(raw_weights, axis=1,
                                        keepdims=True)
         # update mixing_coeffs:
+        # sum_x [ p(X,Z) ] = p(Z)
+        # = sum raw_weigths across samples
         # --> num_mean
-        mix_coeffs = np.sum(post_probs, axis=1)
+        mix_coeffs = np.sum(raw_weights, axis=1)
 
         # update means:
         # --> num_mean x N
