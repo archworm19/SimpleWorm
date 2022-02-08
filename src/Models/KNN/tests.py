@@ -4,6 +4,7 @@ import numpy.random as npr
 import numpy.linalg as nplg
 import pylab as plt
 from clustering import (wKMeans, wGMM)
+from knn import KNN
 
 def test_kmeans():
     km = wKMeans(2)
@@ -126,11 +127,66 @@ def test_gmm():
     plt.scatter(means[:,0], means[:,1])
     plt.show()
 
+def test_knn():
+    import numpy.random as npr
+    # variances are in indep space:
+    variances = np.array([[1., 1.], [0.1, 0.1]])
+
+    v1i = npr.rand(10,2) + np.ones((10,2))
+    v2i = npr.rand(20,2) - np.ones((20,2))
+    full_indeps = np.vstack((v1i, v2i))
+
+    knn = KNN(2, variances)
+
+    print('weights')
+    weights1 = knn._calc_weights(full_indeps[0], full_indeps, variances[0])
+    weights2 = knn._calc_weights(full_indeps[0], full_indeps, variances[1])
+    print(weights1)
+    print(weights2)
+
+    # window selection test:
+    w1ins = np.array([6*i for i in range(10)])
+    w2ins = np.array([200 + 6*i for i in range(20)])
+    win_starts = np.hstack((w1ins,w2ins))
+    # testing with complete non-overlap
+    sel1 = knn._select_nonolap_windows(weights1, win_starts, 6)
+    sel2 = knn._select_nonolap_windows(weights2, win_starts, 6)
+    # testing with overlap
+    sel2olap = knn._select_nonolap_windows(weights2, win_starts, 12)
+    print('olap select')
+    print(sel1)
+    print(sel2)
+    print(sel2olap)
+    print('corresponding weights')
+    print(weights1[sel1])
+    print(weights2[sel2olap])
+
+    # TODO: fit 1sample
+    v1d = npr.rand(10,2) + 2*np.ones((10,2))
+    v2d = npr.rand(20,2) - 2*np.ones((20,2))
+    full_deps = np.vstack((v1d, v2d))
+    # test with no overlap:
+    means, covars, mixing_coeffs, _, _ = knn._fit_1sample(win_starts, 6, full_indeps[0],
+                                                          full_indeps, full_deps, variances[0])
+    print('fit1 no olap')
+    print(means)
+    print(mixing_coeffs)
+    # test with overlap:
+    means, covars, mixing_coeffs, _, _ = knn._fit_1sample(win_starts, 12, full_indeps[0],
+                                                          full_indeps, full_deps, variances[0])
+    print('fit2 olap')
+    print(means)
+    print(mixing_coeffs)
+
+
 if __name__ == '__main__':
     import pylab as plt
 
     # kmeans testing
-    #test_kmeans()
+    test_kmeans()
 
     # wGMM testing
     test_gmm()
+
+    # knn testing
+    test_knn()

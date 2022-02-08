@@ -6,7 +6,7 @@
 from typing import List
 import numpy as np
 import numpy.random as npr
-from h_sampler import SmallSampler
+from Sampler.h_sampler import SmallSampler
 
 class SSFactoryEvenSplit:
     """Factory that builds Small Samplers

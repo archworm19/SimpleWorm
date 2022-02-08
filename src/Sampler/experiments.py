@@ -5,8 +5,8 @@
 from typing import List
 import numpy as np
 import numpy.random as npr
-from anml_factory import ANMLFactory
-from even_split_factory import SSFactoryEvenSplit
+from Sampler.anml_factory import ANMLFactory
+from Sampler.even_split_factory import SSFactoryEvenSplit
 
 # utilities
 
@@ -48,8 +48,21 @@ def build_anml_factory(dat: List[np.ndarray],
 
     Args:
         dat (List[np.ndarray]): animal data
-        twindow_size (int): sampling twindow size 
+            each list element assumed to be
+            from different animal
+            list elements must match in all
+            dims except 0th
+            num_sample_i x N1 x N2 x ...
+        twindow_size (int): time window size 
             used by sampler
+        dep_t_mask (np.ndarray): boolean mask on timeseries
+            data indicating dependent variables
+            twindow_size x N1 x N2 x ...
+        dep_id_mask (np.ndarray): boolean mask on identity data
+            indicating dependent variables
+            For anml, there are 2 identity variables:
+            1. animal identity; 2. time
+        ... repeat for independent dims
         masks (np.ndarray): boolean arrays indicating
             which dimensions are independent / depdendent
             variables

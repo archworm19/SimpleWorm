@@ -422,13 +422,14 @@ class wGMM:
         # --> dist_mat = num_mean x num_sample
         means, dist_mat = self.km.multi_run(dat, priors, num_iter, 2)
         # posterior estimate based on distance matrix:
-        edist = np.exp(-2. * dist_mat) * priors[None]
+        # TODO: this is still a bit wonky
+        edist = np.exp(-1. * dist_mat /
+                       np.mean(dist_mat)) * priors[None]
         posts = edist / np.sum(edist, axis=0, keepdims=True)
         # update raw difference
         # calculate raw difference:
         # --> num_mean x num_sample x N
         raw_diff = dat[None] - means[:, None]
-
         # repeated iterations of 
         # > means / covariance updates
         # > posterior probability calc

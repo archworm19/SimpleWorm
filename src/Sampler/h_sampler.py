@@ -25,10 +25,10 @@
 from typing import List
 import numpy as np
 import numpy.random as npr
-import sampler_iface
+from Sampler.sampler_iface import SamplerIface
 
 
-class SmallSampler(sampler_iface.Sampler):
+class SmallSampler(SamplerIface):
     """Small Hierarchical sampler
     Small size --> store the whole dataset in memory"""
 
@@ -96,6 +96,9 @@ class SmallSampler(sampler_iface.Sampler):
             np.ndarray: num_samples x q array
                 identity indicator data
                 Ex: what worm is this coming from?
+            np.ndarray: starting timepoints of each
+                timewindow
+                len num_samples
         """
         batch, ident_batch, rwindow_starts = [], [], []
         for i in range(self.next_sample, min(self.next_sample + num_samples,
