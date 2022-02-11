@@ -175,6 +175,9 @@ class LayerFactoryIface(abc.ABC):
         """Get number of outputs for each layer"""
         pass
 
+    def get_num_models(self):
+        pass
+
 
 class LayerFactoryBasic(LayerFactoryIface):
 
@@ -198,6 +201,9 @@ class LayerFactoryBasic(LayerFactoryIface):
     
     def get_width(self):
         return self.width
+    
+    def get_num_models(self):
+        return self.num_models
 
 
 class LayerFactoryLowRankInp(LayerFactoryIface):
@@ -227,6 +233,9 @@ class LayerFactoryLowRankInp(LayerFactoryIface):
         self.dim_t = dim_t
         self.low_rank = low_rank
         self.width = width
+
+    def get_num_models(self):
+        return self.num_models
 
     def get_width(self):
         return self.width
