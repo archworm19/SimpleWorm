@@ -6,7 +6,6 @@
     > It is a component of a model because
     it still needs a decoding layer
 """
-import enum
 from typing import List
 import tensorflow as tf
 from Models.SoftTree.layers import LayerFactoryIface, LayerIface

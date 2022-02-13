@@ -16,14 +16,14 @@ DRNG = npr.default_rng(42)
 # utilities
 
 
-def var_construct(v_shape: List[int]):
+def var_construct(v_shape: List[int], v_scale: int = 1.):
     """Construct a uniform random tensorflow variable
     of specified shape
 
     Args:
         v_shape (List[int]): full shape of variable
     """
-    v_np = DRNG.random(v_shape) - 0.5
+    v_np = v_scale * (DRNG.random(v_shape) - 0.5)
     return tf.Variable(v_np.astype(np.float32))
 
 
@@ -72,27 +72,29 @@ class LayerBasic(LayerIface):
         # first 3 dims are batch_size, parallel models, width
         # --> should not be reduced
         self.reduce_dims = [3 + i for i in range(len(xshape))]
+        self.x_reshape = [-1, 1, 1] + xshape
 
     def eval(self, x):
         """Basic evaluation
 
         Args:
             x (TODO): input tensor
-                batches x parallel models x 1 x ...
+                batches x ...
         
         Returns:
             TODO/TYPE: reduced tensor
                 batches x parallel models x width
         """
-        return tf.math.reduce_sum(x * self.wop,
+        x2 = tf.reshape(x, self.x_reshape)
+        return tf.math.reduce_sum(x2 * self.wop,
                                   axis=self.reduce_dims)
 
     def l2(self):
         """L2 calculation
         currently does an averaging out of lazyness
         """
-        return tf.math.reduce_mean(tf.pow(self.w, 2),
-                                   axis=self.reduce_dims)
+        return tf.math.reduce_mean(tf.pow(self.wop, 2),
+                                   axis=[0] + self.reduce_dims)
 
 
 class LayerLowRankTseries(LayerIface):
@@ -129,8 +131,8 @@ class LayerLowRankTseries(LayerIface):
             lowrank (int): the rank constraint
             width (int): number of outputs from the layer
         """
-        self.w_ch = var_construct([num_models, width, ch_dim, lowrank, 1])
-        self.w_t = var_construct([num_models, 1, 1, lowrank, t_dim])
+        self.w_ch = var_construct([num_models, width, ch_dim, lowrank, 1], 2.)
+        self.w_t = var_construct([num_models, 1, 1, lowrank, t_dim], 2.)
         # --> num_models x width x ch_dim x lowrank x t_dim
         wbig = self.w_ch * self.w_t
         # reduce along lowrank
@@ -139,6 +141,7 @@ class LayerLowRankTseries(LayerIface):
         self.wop = tf.expand_dims(self.w, 0)
         # protected dims: batch, num_model x width
         self.reduce_dims = [3,4]
+        self.x_reshape = [-1, 1, 1] + [ch_dim, t_dim]
     
     def eval(self, x):
         """Basic evaluation
@@ -151,7 +154,8 @@ class LayerLowRankTseries(LayerIface):
             TODO/TYPE: reduced tensor
                 batches x parallel models x width
         """
-        return tf.math.reduce_sum(x * self.wop,
+        x2 = tf.reshape(x, self.x_reshape)
+        return tf.math.reduce_sum(x2 * self.wop,
                                   axis=self.reduce_dims)
 
     def l2(self):
@@ -159,8 +163,8 @@ class LayerLowRankTseries(LayerIface):
         currently does an averaging out of lazyness
         """
         # does l2 calc in the outer product space
-        return tf.math.reduce_mean(tf.pow(self.w, 2),
-                                   axis=self.reduce_dims)
+        return tf.math.reduce_mean(tf.pow(self.wop, 2),
+                                   axis=[0] + self.reduce_dims)
 
 # layer factories
 
@@ -206,7 +210,7 @@ class LayerFactoryBasic(LayerFactoryIface):
         return self.num_models
 
 
-class LayerFactoryLowRankInp(LayerFactoryIface):
+class LayerFactoryLowRankTseries(LayerFactoryIface):
 
     def __init__(self,
                  num_models: int,
@@ -241,8 +245,8 @@ class LayerFactoryLowRankInp(LayerFactoryIface):
         return self.width
     
     def build_layer(self):
-        return LayerFactoryLowRankInp(self.num_models,
-                                      self.dim_ch,
-                                      self.dim_t,
-                                      self.low_rank,
-                                      self.width)
+        return LayerLowRankTseries(self.num_models,
+                                   self.dim_ch,
+                                   self.dim_t,
+                                   self.low_rank,
+                                   self.width)
