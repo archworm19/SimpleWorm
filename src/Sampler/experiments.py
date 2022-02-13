@@ -2,10 +2,12 @@
     1. the underlying data
     2. the sampling factories
 """
+from cgi import test
 from typing import List
 import numpy as np
 import numpy.random as npr
-from Sampler.anml_factory import ANMLFactory
+import Sampler.utils as utils
+from Sampler.anml_factory import ANMLFactory, ANMLFactoryMultiSet
 from Sampler.even_split_factory import SSFactoryEvenSplit
 
 # utilities
@@ -76,11 +78,7 @@ def build_anml_factory(dat: List[np.ndarray],
 
     # shuffle-based sampling
     gen = npr.default_rng(rand_seed)
-    inds = np.arange(len(dat))
-    gen.shuffle(inds)
-    numtr = int((2./3.) * len(inds))
-    train_anmls = np.full((len(dat),), False)
-    train_anmls[inds[:numtr]] = True
+    train_anmls = utils.shuffle_sample(len(dat), gen)
 
     # build identity data:
     ident_dat = []
@@ -107,6 +105,86 @@ def build_anml_factory(dat: List[np.ndarray],
                                 indep_id_mask,
                                 1.)
     return train_factory, test_factory.generate_split(0)[0]
+
+
+def build_anml_factory_multiset(t_dat: List[List[np.ndarray]],
+                                id_dat: List[List[np.ndarray]],
+                                twindow_size: int,
+                                dep_t_mask = np.ndarray,
+                                dep_id_mask = np.ndarray,
+                                indep_t_mask = np.ndarray,
+                                indep_id_mask = np.ndarray,
+                                rand_seed: int = 42):
+    """multi set animal factory
+    each list in t/id_dat is a different set
+    each array in these lists = different animal
+
+    break up train-test by animals
+    > breaks up WITHIN each set
+    Assumes: 2/3 train - test split (makes sense assuming 
+        cross-validation in train)
+
+    Args:
+        t_dat (List[np.ndarray]): time series animal data
+            each array element assumed to be
+            from different animal
+            list elements must match in all
+            dims except 0th
+            num_sample_i x N1 x N2 x ...
+        id_dat (List[List[np.ndarray]]): identity data
+            each array assumed to be from different animal
+            each array assumed to have form:
+            num_sample_i x M1
+        twindow_size (int): time window size 
+            used by sampler
+        dep_t_mask (np.ndarray): boolean mask on timeseries
+            data indicating dependent variables
+            twindow_size x N1 x N2 x ...
+        dep_id_mask (np.ndarray): boolean mask on identity data
+            indicating dependent variables
+            M1
+        masks (np.ndarray): boolean arrays indicating
+            which dimensions are independent / depdendent
+            variables
+        rand_seed (int, optional): Defaults to 42.
+    """
+    # ensure dims match across datasets
+    flat_t, flat_id = [], []
+    for i in range(len(t_dat)):
+        assert(len(t_dat[i]) >= 3), "must have >=3 anmls in each set"
+        for j in range(len(t_dat[i])):
+            assert(len(t_dat[i][j]) == len(id_dat[i][j])), "time mismatch"
+        flat_t.extend(t_dat[i])
+        flat_id.extend(id_dat[i])
+    _assert_dim_match(flat_t)
+    _assert_dim_match(flat_id)
+
+    # iter thru each set:
+    gen = npr.default_rng(rand_seed)
+    train_anml, test_anml = [], []
+    for i in range(len(t_dat)):
+        train_bools = utils.shuffle_sample(len(t_dat[i]), gen)
+        train_anml.append(train_bools)
+        test_anml.append(np.logical_not(train_bools))
+
+    train_factory = ANMLFactoryMultiSet(t_dat,
+                                id_dat,
+                                train_anml,
+                                twindow_size,
+                                dep_t_mask,
+                                dep_id_mask,
+                                indep_t_mask,
+                                indep_id_mask)
+    test_factory = ANMLFactoryMultiSet(t_dat,
+                               id_dat,
+                               test_anml,
+                               twindow_size,
+                               dep_t_mask,
+                               dep_id_mask,
+                               indep_t_mask,
+                               indep_id_mask,
+                               1.)
+    return train_factory, test_factory.generate_split()[0]
 
 
 def build_small_factory(dat: List[np.ndarray],
@@ -141,7 +219,7 @@ def build_small_factory(dat: List[np.ndarray],
     """
     _assert_dim_match(dat)
 
-    # get max data length for length normalization:
+    # get max time data length for length normalization:
     max_dlen = _get_max_dat_len(dat)
 
     # seeding random number generator makes 

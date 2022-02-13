@@ -7,6 +7,7 @@
 from typing import List
 import numpy as np
 import numpy.random as npr
+import Sampler.utils as utils
 from Sampler.h_sampler import SmallSampler
 
 
@@ -15,25 +16,27 @@ class ANMLFactory:
     def __init__(self,
                  data: List[np.ndarray],
                  ident_dat: List[np.ndarray],
-                 dat_assign: np.ndarray,
+                 useable_dat: np.ndarray,
                  twindow_size: int,
                  dep_t_mask = np.ndarray,
                  dep_id_mask = np.ndarray,
                  indep_t_mask = np.ndarray,
                  indep_id_mask = np.ndarray,
-                 tr_prob = 0.5):
+                 tr_prob = 0.5,
+                 rand_seed = 66):
         """[summary]
 
         Args:
             data (List[np.ndarray]): [description]
             ident_dat (List[np.ndarray]): [description]
-            dat_assign (np.ndarray): which arrays in data
-                are available for sampling
+            useable_dat (np.ndarray): boolean array
+                of len = len(data) where True
+                indicates an anml can be used
             twindow_size (int): [description]
             tr_prob (float, optional): [description]. Defaults to 0.5.
         """
         self.data = data
-        self.dat_assign = dat_assign
+        self.useable_dat = useable_dat
         self.ident_dat = ident_dat
         self.twindow_size = twindow_size
         self.tr_prob = tr_prob
@@ -41,65 +44,144 @@ class ANMLFactory:
         self.dep_id_mask = dep_id_mask
         self.indep_t_mask = indep_t_mask
         self.indep_id_mask = indep_id_mask
-        assert(len(self.dat_assign) == len(self.data)), "num anml mismatch"
-
-    def _shuffle_sample(self,
-                        rand_seed: int,
-                        data_len: int,
-                        true_perc: float):
-        """Shuffle-based sampling
-
-        Args:
-            rand_seed (int): rng seeed
-            data_len (int): length of data to
-                be sampled
-            true_perc (float): percent of dataset
-                to be marked as true
-        
-        Returns:
-            np.ndarray: data_len boolean array
-                representing samples
-        """
-        gen = npr.default_rng(rand_seed)
-        # only consider available data
-        inds = np.array([i for i in range(data_len)
-                         if self.dat_assign[i]])
+        self.gen = npr.default_rng(rand_seed)
+        assert(len(self.useable_dat) == len(self.data)), "num anml mismatch"
+        assert(len(self.data) == len(self.ident_dat)), "tdat id_dat mismatch"
 
 
-        gen.shuffle(inds)
-        numtr = int(true_perc * len(inds))
-        boolz = np.full((data_len,), False)
-        boolz[inds[:numtr]] = True
-        return boolz
-
-    def generate_split(self, rand_seed: int):
+    def generate_split(self):
         """Generate 50/50 split across animals
         using provided random seed
 
-        Args:
-            rand_seed (int): random seed for rng
         """
-        # sample animals for training
-        # True --> train; False --> Cross
-        train_anmls = self._shuffle_sample(rand_seed, len(self.data), self.tr_prob)
-        # train and test windows ~ can use all overlapping now!
-        offset = 0
-        train_wins, test_wins = [[]], [[]]
-        for i in range(len(self.data)):
-            # NOTE: overlapping allowed in this case
-            win = offset + np.arange(0, len(self.data[i]) - self.twindow_size)
-            offset += len(self.data[i])
-            # only use if available to factory
-            if self.dat_assign[i]:
-                if train_anmls[i]:
-                    train_wins.append(win)
-                else:
-                    test_wins.append(win)
-        full_dat = np.vstack([d for d in self.data])
-        full_id_dat = np.vstack([idn for idn in self.ident_dat])
 
-        return [SmallSampler(full_dat, full_id_dat, np.hstack(train_wins), self.twindow_size,
+        # get indices for training vs. test animals:
+        train_inds, test_inds = utils.generate_anml_split(self.useable_dat,
+                                                            self.gen,
+                                                            self.tr_prob)
+
+        # get data offsets:
+        offsets = utils.get_data_offsets(self.data)
+
+        # stack data and keep track of windows:
+        ind_sets = [train_inds, test_inds]
+        win_sets = []
+        for iset in ind_sets:
+            win_subs = []
+            for ind in iset:
+                offset = offsets[ind]
+                # NOTE: overlapping allowed here
+                win_subs.append(offset + np.arange(0, len(self.data[ind]) - self.twindow_size))
+            win_sets.append(np.hstack((win_subs)))
+
+        full_dat = np.vstack(self.data)
+        full_id_dat = np.vstack(self.ident_dat)
+
+        return [SmallSampler(full_dat, full_id_dat, win_sets[0], self.twindow_size,
                              self.dep_t_mask, self.dep_id_mask, self.indep_t_mask, self.indep_id_mask),
-                SmallSampler(full_dat, full_id_dat, np.hstack(test_wins), self.twindow_size,
+                SmallSampler(full_dat, full_id_dat, win_sets[1], self.twindow_size,
                              self.dep_t_mask, self.dep_id_mask, self.indep_t_mask, self.indep_id_mask)]
 
+
+class ANMLFactoryMultiSet:
+    """Full dataset composed of multiple subsets
+    Sampling done on each subset"""
+    def __init__(self,
+                 data: List[List[np.ndarray]],
+                 ident_dat: List[List[np.ndarray]],
+                 useable_dat: List[np.ndarray],
+                 twindow_size: int,
+                 dep_t_mask = np.ndarray,
+                 dep_id_mask = np.ndarray,
+                 indep_t_mask = np.ndarray,
+                 indep_id_mask = np.ndarray,
+                 tr_prob = 0.5,
+                 rand_seed = 66):
+        """Lists = independent sets
+        Arrays = different animals
+        Sampling is done within each set
+
+        Args:
+            data (List[List[np.ndarray]]): [description]
+            ident_dat (List[List[np.ndarray]]): [description]
+            useable_dat (List[np.ndarray]): boolean array
+                of len = len(data) where True
+                indicates an anml can be used
+            twindow_size (int): [description]
+            tr_prob (float, optional): [description]. Defaults to 0.5.
+        """
+        self.data = data
+        self.useable_dat = useable_dat
+        self.ident_dat = ident_dat
+        self.twindow_size = twindow_size
+        self.tr_prob = tr_prob
+        self.dep_t_mask = dep_t_mask
+        self.dep_id_mask = dep_id_mask
+        self.indep_t_mask = indep_t_mask
+        self.indep_id_mask = indep_id_mask
+        self.gen = npr.default_rng(rand_seed)
+        assert(len(self.useable_dat) == len(self.data)), "num set mismatch"
+        assert(len(self.data) == len(self.ident_dat)), "tdat id_dat mismatch"
+        # TODO: there are more assertions required
+
+    def _split_all_sets(self):
+        """Split data subset into train vs. test
+
+        Returns:
+            np.ndarray: training; integer array of indices
+            np.ndarray: testing; integer array of indices
+
+            NOTE: len(training) + len(testing) = total number
+                of anmls across all sets
+        """
+        offset = 0
+        flat_train_inds, flat_test_inds = [], []
+        for i, _set in enumerate(self.data):
+            # get indices for training vs. test animals:
+            train_inds, test_inds = utils.generate_anml_split(self.useable_dat[i],
+                                                              self.gen, self.tr_prob)
+            flat_train_inds.append(train_inds + offset)
+            flat_test_inds.append(test_inds + offset)
+            offset += len(self.useable_dat[i])
+        return np.hstack(flat_train_inds), np.hstack(flat_test_inds)
+
+    def generate_split(self):
+        """Generate 50/50 split across animals
+        using provided random seed
+
+        """
+        # get training / testing indices within each set
+        # NOTE: after this step: all data can be handled as flat
+        flat_train_inds, flat_test_inds = self._split_all_sets()
+
+        # flatten other data:
+        flat_dat, flat_id = [], []
+        for i, vset in enumerate(self.data):
+            flat_dat.extend(vset)
+            flat_id.extend(self.ident_dat[i])
+
+        # get data offsets:
+        offsets = utils.get_data_offsets(flat_dat)
+
+        # stack data and keep track of windows:
+        # TODO: this is exactly what happens above --> factor
+        ind_sets = [flat_train_inds, flat_test_inds]
+        win_sets = []
+        for iset in ind_sets:
+            win_subs = []
+            for ind in iset:
+                offset = offsets[ind]
+                # NOTE: overlapping allowed here
+                win_subs.append(offset + np.arange(0, len(flat_dat[ind]) - self.twindow_size))
+            if len(win_subs) > 0:
+                win_sets.append(np.hstack((win_subs)))
+            else:
+                win_sets.append([])
+
+        full_dat = np.vstack(flat_dat)
+        full_id_dat = np.vstack(flat_id)
+
+        return [SmallSampler(full_dat, full_id_dat, win_sets[0], self.twindow_size,
+                             self.dep_t_mask, self.dep_id_mask, self.indep_t_mask, self.indep_id_mask),
+                SmallSampler(full_dat, full_id_dat, win_sets[1], self.twindow_size,
+                             self.dep_t_mask, self.dep_id_mask, self.indep_t_mask, self.indep_id_mask)]
