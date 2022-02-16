@@ -1,4 +1,5 @@
 """Test code for knn + clustering"""
+import itertools
 import numpy as np
 import numpy.random as npr
 import numpy.linalg as nplg
@@ -33,6 +34,29 @@ def test_kmeans():
     plt.show()
 
     return dat, means
+
+def test_gmm_probs():
+    # forward probabilities of gmm
+    G = wGMM(1)
+    dim = 3
+    covar = np.eye(dim)
+    covar[1,1] = 2.
+    prec, det = G._decompose_all_covars(covar[None])
+    print('GMM probs')
+    print(prec)
+    print(det)
+    dt = .2
+    xi = np.arange(-10., 10., dt)
+    gen = itertools.product(xi, xi, xi)
+    x = np.array(list(gen))
+    print(np.shape(x))    
+    _, _, fprobs = G.probs(x[None], prec, det, np.array([1.]))
+    print(np.amax(fprobs))
+    print(np.sum(fprobs))
+    # Should be approximately equal to 1
+    print(np.sum(fprobs) * dt**dim)
+    input('cont?')
+
 
 def test_gmm():
     # NOTE: need scipy to run test
@@ -181,6 +205,9 @@ def test_knn():
 
 if __name__ == '__main__':
     import pylab as plt
+
+    # probs testing:
+    test_gmm_probs()
 
     # kmeans testing
     test_kmeans()
