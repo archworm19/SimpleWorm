@@ -10,6 +10,10 @@ if __name__ == '__main__':
 
     # id logic: [food type dims (2), strain dims (2)]
 
+    # window tsize for experiment
+    EXP_TSIZE = 24
+
+
     # filenames
 
     # OP50 + zim:
@@ -29,6 +33,28 @@ if __name__ == '__main__':
               'jh_IAAneg4_run1_trial2_bufferclusts.npz',
               'jh_IAAneg6_run1_trial2_bufferclusts.npz']
     nostim_ids = [0, 1, 1, 0]
+
+
+    # masks:
+    # dependent data = input cells
+    # independent data = all other data
+    # id data has size = len(id dims) + 1 (for timeseries)
+
+    # dep_t_mask = dependent timeseries dims
+    dep_t_mask = np.full((EXP_TSIZE,6), False)
+    dep_t_mask[:,4:6] = True
+    # indep_t_mask = independent timseries dims
+    indep_t_mask = np.full((EXP_TSIZE,6), False)
+    indep_t_mask[:,:4] = True
+    
+    # dep_id_mask = dependent identity dims:
+    dep_id_mask = np.full((EXP_TSIZE,5), False)
+    # indep_id_mask = independent identity dims:
+    indep_id_mask = np.full((EXP_TSIZE,5), True)
+
+    # some safety checks
+    assert(np.sum(indep_t_mask * dep_t_mask) < 1), "safety mask check: t"
+    assert(np.sum(indep_id_mask * dep_id_mask) < 1), "safety mask check: id"
 
     # package data into single list:
     cell_clusts = [zim_op50, npal_op50, nostim]
@@ -74,6 +100,12 @@ if __name__ == '__main__':
             _tdat.append(vi)
     dmat = utils.get_all_array_dists(_tdat)
     print('min defined tday distance: {0}'.format(np.nanmin(dmat)))
+
+    print('set sizes')
+    for i in range(len(all_dats)):
+        print(len(all_dats[i]))
+        print(len(all_ids[i]))
+
 
 
 
