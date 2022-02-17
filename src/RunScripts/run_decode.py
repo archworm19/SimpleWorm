@@ -4,7 +4,6 @@ import copy
 import numpy as np
 
 import utils
-from inp_data import  TrialTimeData
 
 if __name__ == '__main__':
     rdir = '/Users/ztcecere/Data/ProcCellClusters'
@@ -35,33 +34,44 @@ if __name__ == '__main__':
     cell_clusts = [zim_op50, npal_op50, nostim]
     id_dat = [zim_op50_ids, npal_op50_ids, nostim_ids]
 
-    # flatten out data ~ ensuring time series
+    # flatten out data within each set
     # data and identity data match
-    all_dats, all_idz, tlens = [], [], []
+    all_dats, all_ids, tlens = [], [], []
+    # iter thru sets
     for i, cc in enumerate(cell_clusts):
+        sub_dats, sub_ids = [], []
         for fn in cc:
             npz_dat = np.load(os.path.join(rdir,fn))
             for k in npz_dat:
-                all_dats.append(npz_dat[k])
-                all_idz.append(copy.deepcopy(id_dat[i]))
+                sub_dats.append(npz_dat[k])
+                sub_ids.append(copy.deepcopy(id_dat[i]))
                 tlens.append(np.shape(npz_dat[k])[0])
+        all_dats.append(sub_dats)
+        all_ids.append(sub_ids)
 
-    # package into List[TrialTimeData]
-    pkg_tdat = []
+    # remake all ids to be in tseries format:
+    all_ids2 = []
     max_tlen = np.amax(np.array(tlens))
     print('max tlen: {0}'.format(max_tlen))
-    for i in range(len(all_dats)):
-        cur_tlen = np.shape(all_dats[i])[0]
-        cid = np.array(all_idz[i])
-        tile_idz = np.tile(cid[None], (cur_tlen,1))
-        twins = np.arange(cur_tlen) / max_tlen
-        ids_combos = np.hstack((twins[:,None], tile_idz))
-        pkg_tdat.append(TrialTimeData(all_dats[i], ids_combos))
+    for i in range(len(all_ids)):
+        sub_ids2 = []
+        for j in range(len(all_ids[i])):
+            cur_tlen = np.shape(all_dats[i][j])[0]
+            cid = np.array(all_ids[i][j])
+            tile_idz = np.tile(cid[None], (cur_tlen,1))
+            twins = np.arange(cur_tlen) / max_tlen
+            ids_combos = np.hstack((twins[:,None], tile_idz))
+            sub_ids2.append(ids_combos)
+        all_ids2.append(sub_ids2)       
+    all_ids = all_ids2
 
-    print('number of anmls: {0}'.format(len(pkg_tdat)))
+    print('number of animals: {0}'.format(len(all_ids)))
 
     # ensure we don't have any extra data:
-    _tdat = [TTD.time_data for TTD in pkg_tdat]
+    _tdat = []
+    for v in all_dats:
+        for vi in v:
+            _tdat.append(vi)
     dmat = utils.get_all_array_dists(_tdat)
     print('min defined tday distance: {0}'.format(np.nanmin(dmat)))
 
