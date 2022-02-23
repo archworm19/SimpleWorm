@@ -67,8 +67,11 @@ class LayerBasic(LayerIface):
                 doesn't include parallel models or batch_size
             width (int): number of outputs from the layer
         """
+        # coefficients
         self.w = var_construct([num_models, width] + xshape)
         self.wop = tf.expand_dims(self.w, 0)
+        # offsets
+        self.offset = var_construct([num_models, width])
         # first 3 dims are batch_size, parallel models, width
         # --> should not be reduced
         self.reduce_dims = [3 + i for i in range(len(xshape))]
@@ -86,8 +89,8 @@ class LayerBasic(LayerIface):
                 batches x parallel models x width
         """
         x2 = tf.reshape(x, self.x_reshape)
-        return tf.math.reduce_sum(x2 * self.wop,
-                                  axis=self.reduce_dims)
+        return self.offset + tf.math.reduce_sum(x2 * self.wop,
+                                                axis=self.reduce_dims)
 
     def l2(self):
         """L2 calculation
@@ -131,10 +134,13 @@ class LayerLowRankTseries(LayerIface):
             lowrank (int): the rank constraint
             width (int): number of outputs from the layer
         """
+        # coefficients
         self.w_ch = var_construct([num_models, width, ch_dim, lowrank, 1], 2.)
         self.w_t = var_construct([num_models, 1, 1, lowrank, t_dim], 2.)
         # --> num_models x width x ch_dim x lowrank x t_dim
         wbig = self.w_ch * self.w_t
+        # offsets
+        self.offset = var_construct([num_models, width])
         # reduce along lowrank
         # --> num_models x width x ch_dim x t_dim
         self.w = tf.reduce_sum(wbig, axis=[3])
@@ -155,8 +161,8 @@ class LayerLowRankTseries(LayerIface):
                 batches x parallel models x width
         """
         x2 = tf.reshape(x, self.x_reshape)
-        return tf.math.reduce_sum(x2 * self.wop,
-                                  axis=self.reduce_dims)
+        return self.offset + tf.math.reduce_sum(x2 * self.wop,
+                                                axis=self.reduce_dims)
 
     def l2(self):
         """L2 calculation
