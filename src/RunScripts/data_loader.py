@@ -1,4 +1,4 @@
-"""Hardcoded function to get worm data in correct format"""
+"""Hardcoded functions to get worm data in correct format"""
 from typing import List
 import os
 import copy
