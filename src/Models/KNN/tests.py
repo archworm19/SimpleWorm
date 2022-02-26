@@ -5,6 +5,7 @@ import numpy.random as npr
 import numpy.linalg as nplg
 import pylab as plt
 from clustering import (wKMeans, wGMM)
+from binary_clustering import wBMM
 from knn import KNN
 
 def test_kmeans():
@@ -203,17 +204,35 @@ def test_knn():
     print(mixing_coeffs)
 
 
+def load_binary_dat():
+    x = np.array([[0, 1], [0, 1], [0,1],
+                  [1, 0], [1, 0], [1,0]])
+    return x
+
+
+def test_bin_clust_components():
+    B = wBMM(2)
+    x = load_binary_dat()
+    means = np.array([[.99, .01], [.01, .99]])
+    mix_coeffs = np.array([.5, .5])
+    post_probs, mixing_probs, for_probs = B.probs(x, means, mix_coeffs)
+    print(for_probs)
+    print(mixing_probs)
+    print(post_probs)
+
+
 if __name__ == '__main__':
-    import pylab as plt
 
     # probs testing:
-    test_gmm_probs()
+    # test_gmm_probs()
 
     # kmeans testing
-    test_kmeans()
+    # test_kmeans()
 
     # wGMM testing
-    test_gmm()
+    # test_gmm()
 
     # knn testing
-    test_knn()
+    # test_knn()
+
+    test_bin_clust_components()

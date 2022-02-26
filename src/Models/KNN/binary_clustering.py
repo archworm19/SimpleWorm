@@ -50,10 +50,10 @@ class wBMM:
             np.ndarray: posterior probabilities
                 normalized across means (within sample)
                 num_mean x num_sample
-            np.ndarray: mixing probabilities
-                forward probabilities scaled by mixing coeffs
+            np.ndarray: mixing log-likelihood
+                forward log-likelihood scaled by mixing coeffs
                 num_mean x num_sample
-            np.ndarray: forward probabilities
+            np.ndarray: forward log-likelihood
                 num_mean x num_sample
         """
         # forward probabilities 
@@ -61,18 +61,28 @@ class wBMM:
         # Independent assumption: sum across timepoints within each mean
         x2 = x[None]  # --> 1 x num_sample x N
         mu2 = means[:,None]  # --> num_mean x 1 x N
-        full_ll = x2 * np.log(mu2) + (1. - x2) * np.log(1. - mu2)
-        # reduce across N --> num_mean x num_sample
-        forward_probs = np.sum(full_ll, axis=2)
 
-        # scale by mixing coefficients
-        mixing_probs = mixing_coeffs[:,None] * forward_probs
+        # full likelihood
+        # num_mean x num_sample x N
+        full_like = (mu2**x2) * (1. - mu2)**(1. - x2)
+
+        # correct math
+        # > prod reduce mixing_like --> num_mean x num_sample
+        # > normalize across means for posteriors
+        # ... Potential issue: could get underflow from reduction
+        # TODO: let's do correct first --> figure out how to address underflow
+        forward_like = np.prod(full_like, axis=2)
+
+        # scale by mixing coeffs
+        # --> num_mean x num_sample
+        mixing_like = mixing_coeffs[:,None] * forward_like
 
         # calculate posteriors
         # normalize across means
-        post_probs = mixing_probs / np.sum(mixing_probs, axis=0,
+        post_probs = mixing_like / np.sum(mixing_like, axis=0,
                                            keepdims=True)
-        return post_probs, mixing_probs, forward_probs
+        return post_probs, mixing_like, forward_like
+
 
     def update(self,
                x: np.ndarray,
@@ -117,8 +127,69 @@ class wBMM:
         
         return means, mix_coeffs
 
-    # TODO: random initialization
 
-    # TODO: run 
-    # > initialize
-    # > repeated loop of 1. probs; 2. update
+    def rand_init(self, x: np.ndarray,
+                  priors: np.ndarray,
+                  num_mean: int):
+        """Randomly initialize means and mixing coeffs
+        Strategy:
+        > shuffle x (indices of x ~ x remains unchanged)
+        > break up shuffled x into num_mean groups
+        > weighted means
+
+        Args:
+            x (np.ndarray): sample data
+                num_sample x N
+            priors (np.ndarray): data prior probabilities
+                len num_sample
+            num_mean (int): number of means
+        
+        Returns:
+            np.ndarray: initial estimate of means
+                num_mean x N
+        """
+        # shuffle:
+        inds = [i for i in range(np.shape(x)[0])]
+        self.rng.shuffle(inds)
+        block_size = int(np.floor(len(inds) / num_mean))
+        means = []
+        for z in num_mean:
+            zinds = inds[z*block_size:(z+1)*block_size]
+            pz = priors[zinds]
+            xz = x[zinds]
+            mu = np.sum(pz[:,None] * xz, axis=0)
+            means.append(mu)
+        mixing_coeffs = np.ones((num_mean)) * (1. / num_mean)
+        return np.array(means), mixing_coeffs
+
+
+    def run(self, x: np.ndarray,
+                  priors: np.ndarray,
+                  num_mean: int,
+                  num_iter: int = 5):
+        """Single run
+        > random init
+        > repeated iters of
+        > > probs
+        > > updates 
+
+        Args:
+            x (np.ndarray): sample data
+                num_sample x N
+            priors (np.ndarray): data prior probabilities
+                len num_sample
+            num_mean (int): number of means
+        
+        Returns:
+            TODO
+        """
+        means, mixing_coeffs = self.rand_init(x, priors, self.num_mean)
+        post_probs, forward_probs = None, None
+        for i in range(num_iter):
+            post_probs, _, forward_probs = self.probs(x,
+                                                      means,
+                                                      mixing_coeffs)
+            means, mixing_coeffs = self.update(x, post_probs, priors)
+        # TODO: is this return signature right?
+        return means, mixing_coeffs, post_probs, forward_probs
+  
