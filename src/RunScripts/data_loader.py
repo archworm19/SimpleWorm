@@ -5,41 +5,108 @@ import copy
 import numpy as np
 import utils
 
-def _load_helper(rdir: str, 
-                 fns: List[List[str]],
-                 num_cells_use: int = 4):
-    """Loads data --> returns as flat list of numpy arrays
-    Expected to recieve filenames for a single set
-    
-    rdir (str): root directory ~ where files are stored
-    fns (List[str]): cell and input relative filenames
-        each sub-list is a cell - input pair
-    num_cells_use (int): use the first [num_cells_use] cells    
+
+def _make_2d(ar: np.ndarray):
+    """If array is NOT 2d --> reshape it
+    into a column array
+
+    Args:
+        ar (np.ndarray): target array
     """
-    rars = []
-    for v in fns:
-        cellz = np.load(os.path.join(rdir,v[0]))
-        inpz = np.load(os.path.join(rdir, v[1]))
-        for k in cellz:
-            # ensure input is correct shape:
-            inpc = np.reshape(inpz[k], (-1,1))
-            rars.append(np.hstack((cellz[k][:,:num_cells_use], inpc)))
-    return rars
+    if len(np.shape(ar)) == 1:
+        return np.reshape(ar, (-1,1))
+    return ar
+
+
+def _get_reference_keys(fn: str):
+    """get keys from npz file
+
+    Args:
+        fn (str): name of npz file
+    """
+    return list(np.load(fn).keys())
+
+
+def _load_npz(fn: str,
+              keys: List[str]):
+    """Load npz file
+
+    Args:
+        fn (str): name of npz
+        keys (List[str], optional): set of keys to looks for
+            return in order of keys
+            Throws error if missing key 
+    
+    Returns: List[np.ndarray]
+        in order defined by keys
+
+    """
+    dat = np.load(fn)
+    dat2 = []
+    for k in keys:
+        dat2.append(dat[k])
+    return dat2
+
+
+def _zip_stack(dat: List[List[np.ndarray]]):
+    """Sub-lists are aligned --> stack dat[i][j] with dat[k][j]
+
+    Args:
+        dat (List[List[np.ndarray]]):
+    """
+    flat_dat = []
+    for i in range(len(dat[0])):
+        v = [dat[j][i] for j in range(len(dat))]
+        flat_dat.append(np.hstack(v))
+    return flat_dat
+
+
+def _load_set(rdir: str, fns: List[str],
+              ave_bools: List[bool]):
+    """Load a single set; all fns in the set
+    must have the same reference keys
+
+    Args:
+        rdir (str): root directory
+        fns (List[str]): filenames
+        ave_bool (List[bool]): booleans that
+            indicate whether subset should be averaged
+            Shape must match fns 
+    """
+    ref_keys = _get_reference_keys(os.path.join(rdir, fns[0]))
+    dat = []
+    for i, ave_bool in enumerate(ave_bools):
+        fn = os.path.join(rdir, fns[i])
+        ar_l = _load_npz(fn, ref_keys)
+        # ensure 2d and contract if necessary:
+        ar_l2 = []
+        for j in range(len(ar_l)):
+            v = _make_2d(ar_l[j])
+            if ave_bool:
+                v = np.mean(v, axis=1, keepdims=True)
+            ar_l2.append(v)
+        dat.append(ar_l2)
+    return _zip_stack(dat)
 
 
 def _load_zim(rdir: str):
-    """Load zim + op50 data"""
+    """Load zim + op50 data
+    NOTE: zim data needs primary sensory neurons inserted"""
     # OP50 + zim:
-    zim_op50 = [['Yanno_op50_SF.npz', 'inpfull_op50_SF.npz'],
-                ['Yanno_op50_mixMotif.npz', 'inpfull_op50_mixMotif.npz'],
-                ['Yanno_op50_pulseBias.npz', 'inpfull_op50_pulseBias.npz']]
-    
-    return _load_helper(rdir, zim_op50)
+    zim_op50 = [['Yanno_op50_SF.npz', 'Yop50_SF_psON.npz', 'Yop50_SF_psOFF.npz', 'inpfull_op50_SF.npz'],
+                ['Yanno_op50_mixMotif.npz', 'Yop50_mixMotif_psON.npz', 'Yop50_mixMotif_psOFF.npz', 'inpfull_op50_mixMotif.npz'],
+                ['Yanno_op50_pulseBias.npz', 'Yop50_pulseBias_psON.npz', 'Yop50_pulseBias_psOFF.npz', 'inpfull_op50_pulseBias.npz']]
+    ave_bools = [False, True, True, False]
+    flat_dat = []
+    for fn_set in zim_op50:
+        flat_dat.extend(_load_set(rdir, fn_set, ave_bools))
+    return flat_dat
 
 
 def _load_npal(rdir: str):
-    npal_op50 = [['Yanno_Neuropal.npz', 'inpfull_Neuropal.npz']]
-    return _load_helper(rdir, npal_op50)
+    fns = ['Yanno_Neuropal.npz', 'YNeuropal_psON.npz', 'YNeuropal_psOFF.npz', 'inpfull_Neuropal.npz']
+    ave_bools = [False, True, True, False]
+    return _load_set(rdir, fns, ave_bools)
 
 
 def _load_nostim(rdir: str):
@@ -48,8 +115,11 @@ def _load_nostim(rdir: str):
               ['jh_DIACneg7_trial2_bufferclusts.npz', 'jh_DIACneg7_trial2_bufferstim.npz'],
               ['jh_IAAneg4_run1_trial2_bufferclusts.npz', 'jh_IAAneg4_run1_trial2_bufferstim.npz'],
               ['jh_IAAneg6_run1_trial2_bufferclusts.npz', 'jh_IAAneg6_run1_trial2_bufferstim.npz']]
-    v = _load_helper(rdir, nostim)
-    return v
+    ave_bools = [False, False]
+    flat_dat = []
+    for fn_set in nostim:
+        flat_dat.extend(_load_set(rdir, fn_set, ave_bools))
+    return flat_dat
 
 
 def _get_max_tlen(ars: List[np.ndarray]):
@@ -171,5 +241,16 @@ def load_all_data():
 
 
 if __name__ == '__main__':
-    load_all_data()
+    cc, ids = load_all_data()
+    import pylab as plt
+    for k, v in enumerate(cc):
+        print('\n ' + str(k))
+        for vi in v:
+            print(np.shape(vi))
+            plt.figure()
+            plt.plot(vi[:,0])
+            plt.plot(vi[:,4])
+            plt.plot(vi[:,5])
+            plt.plot(vi[:,6])
+            plt.show()
     
