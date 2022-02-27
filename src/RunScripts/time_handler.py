@@ -11,6 +11,7 @@
     > > Compare it to time memorization
 
 """
+from re import sub
 from typing import List, Dict
 import numpy as np
 
@@ -57,7 +58,7 @@ def _break_windows(x: np.ndarray,
 
 def window_break_anmls(x: List[np.ndarray],
                        time_windows: List[np.ndarray]):
-    """Calculate the variance in each time window across anmls
+    """Break up each animal into distinct time windows
 
     Args:
         x (List[np.ndarray]): target value
@@ -66,15 +67,13 @@ def window_break_anmls(x: List[np.ndarray],
             matches size of x
 
     Returns:
-        Dict: mapping from time window to array
-            array = all datapoints (subset of x)
-            that occur in this time window across anmls
+        Dict[int, List[np.ndarray]]: mapping from time window
+            to list of arrays. Each array in this list
+            is from a different animal
     """
     wins = {}
     for i in range(len(x)):
         _break_windows(x[i], time_windows[i], wins)
-    for k in wins:
-        wins[k] = np.hstack(wins[k])
     return wins
 
 
@@ -93,26 +92,54 @@ def window_variance_anml(x: List[np.ndarray],
     kord = np.sort(list(wd.keys()))
     varz = []
     for k in kord:
-        varz.append(np.var(wd[k]))
+        st_dat = np.hstack(wd[k])
+        varz.append(np.var(st_dat))
     return varz
+
+
+def window_supervariance_anml(x: List[np.ndarray],
+                              time_windows: List[np.ndarray]):
+    """Calculate super variance for each time window across
+    all animals
+    Supervariance: calc variance within each animal
+        -> average across animals, within time window
+
+    Args:
+        x (List[np.ndarray]): target data
+        time_windows (List[np.ndarray]): time windows
+            matches shape of x
+    """
+    wd = window_break_anmls(x, time_windows)
+    # order the keys:
+    kord = np.sort(list(wd.keys()))
+    super_varz = []
+    for k in kord:
+        sub_dat = wd[k]
+        sub_varz = [np.var(sdi) for sdi in sub_dat]
+        super_varz.append(np.mean(sub_varz))
+    return super_varz
 
 
 def variance_anml(x: List[np.ndarray],
                   time_vals: List[np.ndarray],
-                  window_size: int):
+                  window_size: int,
+                  super_var: bool = True):
     """Run full variance experiment
 
     Args:
         x (List[np.ndarray]): target data
         time_vals (List[np.ndarray]): time for 
             each datapoint in target data
+        window_size (int)
+        super_var (bool): if true --> get super-variance
+            if false --> get variance of stacked data
     """
     time_windows = [time_discretize(tvi, window_size)
                      for tvi in time_vals]
-    return window_variance_anml(x, time_windows)
-
-
-
+    if super_var:
+        return window_supervariance_anml(x, time_windows)
+    else:
+        return window_variance_anml(x, time_windows)
 
 
 if __name__ == '__main__':
@@ -136,7 +163,7 @@ if __name__ == '__main__':
     window_sizes = [5, 10, 20, 40, 60]
     varz = []
     for i, ws in enumerate(window_sizes):
-        v_sub = variance_anml([x, x2], [ar, ar2], ws)
+        v_sub = variance_anml([x, x2], [ar, ar2], ws, super_var=True)
         print(v_sub)
         input('cont?')
  

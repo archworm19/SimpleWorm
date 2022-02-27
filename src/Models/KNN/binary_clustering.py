@@ -1,5 +1,8 @@
 """Binary Clustering
 
+    TODO: this needs a stronger mathematical basis
+    --> stick to GMM for now
+
     Example Use Case:
     > have some signal u(t)
     > u(t) is in {0, 1}
