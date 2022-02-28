@@ -95,7 +95,8 @@ def _load_zim(rdir: str):
     # OP50 + zim:
     zim_op50 = [['Yanno_op50_SF.npz', 'Yop50_SF_psON.npz', 'Yop50_SF_psOFF.npz', 'inpfull_op50_SF.npz'],
                 ['Yanno_op50_mixMotif.npz', 'Yop50_mixMotif_psON.npz', 'Yop50_mixMotif_psOFF.npz', 'inpfull_op50_mixMotif.npz'],
-                ['Yanno_op50_pulseBias.npz', 'Yop50_pulseBias_psON.npz', 'Yop50_pulseBias_psOFF.npz', 'inpfull_op50_pulseBias.npz']]
+                ['Yanno_op50_pulseBias.npz', 'Yop50_pulseBias_psON.npz', 'Yop50_pulseBias_psOFF.npz', 'inpfull_op50_pulseBias.npz'],
+                ['Yanno_dop1_cntrl.npz', 'Ydop1_cntrl_psON.npz', 'Ydop1_cntrl_psOFF.npz', 'inpfull_dop1_cntrl.npz']]
     ave_bools = [False, True, True, False]
     flat_dat = []
     for fn_set in zim_op50:
