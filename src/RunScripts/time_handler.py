@@ -142,6 +142,80 @@ def variance_anml(x: List[np.ndarray],
         return window_variance_anml(x, time_windows)
 
 
+def _doublewin_variance(x_win: List[np.ndarray],
+                        T_awin: int):
+    """Double Window Variance Calculation
+    Considers a single time window across animals
+    > Find all analysis time windows in this time window
+    > > across animals
+    > Subtract from mean representation
+
+    How differ from variance?
+    Consider where T_awin approx = len(x_win)
+    AND every animal has same complex patrn for given x_win
+    > Variance will be high
+    > Double window variance = 0
+
+    Args:
+        x_win (List[np.ndarray]): single window each
+            array is a different anml
+        T_awin (int): Analysis timewindow
+
+    Returns:
+        float: variance calculation for the window across
+            time and across animals
+    """
+    x_align_stack = []
+    for xi in x_win:
+        if len(xi) - T_awin <= 0:
+            continue
+        for z in range(0, len(xi) - T_awin):
+            x_align_stack.append(xi[z:z+T_awin])
+    x_align_stack = np.array(x_align_stack)
+    mu = np.mean(x_align_stack, axis=0, keepdims=True)
+    var = np.mean((x_align_stack - mu) ** 2.0)
+    return var
+
+def doublewindow_variance_anml(x: List[np.ndarray],
+                              time_windows: List[np.ndarray],
+                              T_awin: int):
+    """Runs double window variance calculation for 
+        all timewindows and all animals
+
+    Args:
+        x (List[np.ndarray]): target data
+        time_windows (List[np.ndarray]): time windows
+            matches shape of x
+    """
+    wd = window_break_anmls(x, time_windows)
+    # order the keys ~ different timewindows
+    kord = np.sort(list(wd.keys()))
+    varz = []
+    for k in kord:
+        varz.append(_doublewin_variance(wd[k], T_awin))
+    return varz
+
+def run_double(x: List[np.ndarray],
+                  time_vals: List[np.ndarray],
+                  window_size: int,
+                  T_awin: int):
+    """Run Double Window Experiment
+    See _doublewin_variance DocString
+
+    Args:
+        x (List[np.ndarray]): target data
+        time_vals (List[np.ndarray]): time for 
+            each datapoint in target data
+        window_size (int)
+        T_awin (int): Analysis Timewindow
+            should be < window_size
+
+    """
+    time_windows = [time_discretize(tvi, window_size)
+                    for tvi in time_vals]
+    return doublewindow_variance_anml(x, time_windows, T_awin)
+
+
 if __name__ == '__main__':
     ar = np.arange(100)
     ar2 = np.arange(75)
@@ -160,10 +234,11 @@ if __name__ == '__main__':
     v = window_break_anmls([x, x2], [time_wins, time_wins2])
     print(v)
 
-    window_sizes = [5, 10, 20, 40, 60]
+    window_sizes = [10, 20, 40, 60]
     varz = []
     for i, ws in enumerate(window_sizes):
-        v_sub = variance_anml([x, x2], [ar, ar2], ws, super_var=True)
+        #v_sub = variance_anml([x, x2], [ar, ar2], ws, super_var=True)
+        v_sub = run_double([x, x2], [ar, ar2], ws, 5)
         print(v_sub)
         input('cont?')
  

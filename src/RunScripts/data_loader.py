@@ -101,13 +101,13 @@ def _load_zim(rdir: str):
     flat_dat = []
     for fn_set in zim_op50:
         flat_dat.extend(_load_set(rdir, fn_set, ave_bools))
-    return flat_dat
+    return flat_dat, ['AVA', 'RME', 'SMDV', 'SMDD', 'ON', 'OFF', 'STIM']
 
 
 def _load_npal(rdir: str):
     fns = ['Yanno_Neuropal.npz', 'YNeuropal_psON.npz', 'YNeuropal_psOFF.npz', 'inpfull_Neuropal.npz']
     ave_bools = [False, True, True, False]
-    return _load_set(rdir, fns, ave_bools)
+    return _load_set(rdir, fns, ave_bools), ['AVA', 'RME', 'SMDV', 'SMDD', 'ON', 'OFF', 'STIM']
 
 
 def _load_nostim(rdir: str):
@@ -120,7 +120,7 @@ def _load_nostim(rdir: str):
     flat_dat = []
     for fn_set in nostim:
         flat_dat.extend(_load_set(rdir, fn_set, ave_bools))
-    return flat_dat
+    return flat_dat, ['AVA', 'RME', 'SMDV', 'SMDD', 'ON', 'OFF', 'STIM']
 
 
 def _get_max_tlen(ars: List[np.ndarray]):
@@ -203,15 +203,15 @@ def load_all_data():
     # filenames
 
     # OP50 + zim:
-    zim_op50 = _load_zim(rdir)
+    zim_op50, zim_op50_cells = _load_zim(rdir)
     zim_op50_ids = [1, 0, 1, 0]
 
     # OP50 + npal:
-    npal_op50 = _load_npal(rdir)
+    npal_op50, npal_op50_cells = _load_npal(rdir)
     npal_op50_ids = [1, 0, 0, 1]
 
     # nostim
-    nostim = _load_nostim(rdir)
+    nostim, nostim_cells = _load_nostim(rdir)
     nostim_ids = [0, 1, 1, 0]
 
     # get tmax:
@@ -238,11 +238,12 @@ def load_all_data():
     dmat = utils.get_all_array_dists(cell_clusts[0] + cell_clusts[1] + cell_clusts[2])
     print('min defined tday distance: {0}'.format(np.nanmin(dmat)))
 
-    return cell_clusts, all_ids
+    return cell_clusts, all_ids, [zim_op50_cells, npal_op50_cells, nostim_cells]
 
 
 if __name__ == '__main__':
-    cc, ids = load_all_data()
+    cc, ids, cellz = load_all_data()
+    print(cellz)
     import pylab as plt
     for k, v in enumerate(cc):
         print('\n ' + str(k))
