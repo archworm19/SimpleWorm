@@ -16,4 +16,6 @@
 if __name__ == "__main__":
     T_awin = 24
     T_discs = [10, 20, 50, 100, 200]
-    
+
+
+    # TODO: call time_handler.run_double
