@@ -174,16 +174,23 @@ class wGMM:
     Weights = priors    
     """
 
-    def __init__(self, num_means: int, tolerance: float = 1e-5):
+    def __init__(self, num_means: int,
+                 tolerance: float = 1e-5,
+                 prior_precision: float = 1.):
         """Initialize weighted Gaussian Mixture Model
 
         Args:
             num_means (int): number of clusters/means
             tolerance (float): tolerance for decomposition
                 prevents vanishing variance
+            prior_precision (float): precision that define
+                initial assignment of datapoints to means
+                prior_precision -> 0; uniform probabilities
+                prior_precision -> inf; k-means
         """
         self.num_means = num_means
         self.tolerance = tolerance
+        self.prior_precision = prior_precision
         self.rng = npr.default_rng(66)
         self.km = wKMeans(num_means)
 
@@ -416,14 +423,13 @@ class wGMM:
             np.ndarray: posterior probabilities
                 num_mean x num_sample array
         """
-
         # init with kmeans:
         # --> means = num_mean x N
         # --> dist_mat = num_mean x num_sample
         means, dist_mat = self.km.multi_run(dat, priors, num_iter, 2)
         # posterior estimate based on distance matrix:
         # TODO: this is still a bit wonky
-        edist = np.exp(-1. * dist_mat /
+        edist = np.exp(-1. * self.prior_precision * dist_mat /
                        np.mean(dist_mat)) * priors[None]
         posts = edist / np.sum(edist, axis=0, keepdims=True)
         # update raw difference
