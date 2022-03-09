@@ -171,6 +171,8 @@ def _doublewin_variance(x_win: List[np.ndarray],
             continue
         for z in range(0, len(xi) - T_awin):
             x_align_stack.append(xi[z:z+T_awin])
+    if len(x_align_stack) == 0:
+        return np.nan
     x_align_stack = np.array(x_align_stack)
     mu = np.mean(x_align_stack, axis=0, keepdims=True)
     var = np.mean((x_align_stack - mu) ** 2.0)
@@ -188,6 +190,7 @@ def doublewindow_variance_anml(x: List[np.ndarray],
             matches shape of x
     """
     wd = window_break_anmls(x, time_windows)
+
     # order the keys ~ different timewindows
     kord = np.sort(list(wd.keys()))
     varz = []
