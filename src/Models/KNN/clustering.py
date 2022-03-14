@@ -50,22 +50,27 @@ class wKMeans:
                 means of current update
             grp_size (np.ndarray): number of elems
                 assigned to each cluster
-                DESTRUCTIVE
-
+        
+        Returns:
+            np.ndarray: num_mean x N array of all means
         """
-        add_means = []
+
         num_miss = self.num_means - np.shape(new_means)[0]
-        mu_shape = np.shape(new_means[1])
-        for _ in num_miss:
-            # largest group:
-            maxg = np.argmax(grp_size)
-            # remake group size
-            v = grp_size[maxg] / 2.
-            grp_size[maxg] = v
-            grp_size = np.hstack((grp_size, [v]))
-            # add mean:
-            add_means.append(new_means[maxg] + self.rng.random(mu_shape))
-        return add_means
+        mu_shape = np.shape(new_means[0])
+        # total assigned --> mean indices
+        mu_inds = [[z] for z in range(len(grp_size))]
+        for i in range(num_miss):
+            assign_density = [grp_size[z] / len(mu_inds[z])
+                                for z in range(len(grp_size))]
+            # assign to highest number of pts per means
+            maxg = np.argmax(assign_density)
+            mu_inds[maxg].append(i + len(new_means))
+        # make the final means:
+        muz = []
+        for i, mui in enumerate(mu_inds):
+            for _ in mui:
+                muz.append(new_means[i] + 1e-8 * self.rng.random(mu_shape))
+        return np.array(muz)
     
     def _update_iter(self,
                      dat: np.ndarray,
@@ -95,8 +100,8 @@ class wKMeans:
             grp_size.append(len(dgrp))
         # deal with cluster loss
         if len(means) < self.num_means:
-            means = means + self._handle_cluster_loss(np.array(means),
-                                                      grp_size)
+            means = self._handle_cluster_loss(np.array(means),
+                                              grp_size)
         return np.array(means)
     
     def _init_means(self, dat: np.ndarray):

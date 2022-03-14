@@ -1,12 +1,10 @@
 """Test code for knn + clustering"""
 import itertools
-from Models.KNN.clustering import nan_weight_cov
 import numpy as np
 import numpy.random as npr
 import numpy.linalg as nplg
 import pylab as plt
-from clustering import (wKMeans, wGMM, nan_weight_mu)
-from binary_clustering import wBMM
+from clustering import (wKMeans, wGMM)
 from knn import KNN
 
 def test_kmeans():
@@ -205,21 +203,24 @@ def test_knn():
     print(mixing_coeffs)
 
 
-def load_binary_dat():
-    x = np.array([[0, 1], [0, 1], [0,1],
-                  [1, 0], [1, 0], [1,0]])
-    return x
+def test_kmeans_recovery():
+    # recovery = where one mean gets no datapoints
+    # How to get back?
+    km = wKMeans(7)
+    new_means = np.vstack((np.ones((3,)), 2.*np.ones((3,))))
+    grp_sizes = np.array([7, 2])
+    add_means = km._handle_cluster_loss(new_means, grp_sizes)
+    print(add_means)
 
-
-def test_bin_clust_components():
-    B = wBMM(2)
-    x = load_binary_dat()
-    means = np.array([[.99, .01], [.01, .99]])
-    mix_coeffs = np.array([.5, .5])
-    post_probs, mixing_probs, for_probs = B.probs(x, means, mix_coeffs)
-    print(for_probs)
-    print(mixing_probs)
-    print(post_probs)
+    # testing full update iter where we've lost means
+    km = wKMeans(4)
+    dat1 = npr.rand(10,3)
+    dat2 = -1. * npr.rand(10,3)
+    dat = np.vstack((dat1, dat2))
+    clust_assigns = np.hstack((np.zeros((10,)), np.ones((10,))))
+    priors = np.ones((20,)) / 20.
+    omeans = km._update_iter(dat, clust_assigns, priors)
+    print(omeans)
 
 
 if __name__ == '__main__':
@@ -231,12 +232,10 @@ if __name__ == '__main__':
     # test_kmeans()
 
     # wGMM testing
-    # test_gmm()
+    test_gmm()
 
     # knn testing
-    test_knn()
+    #test_knn()
 
-    # nan testing
-    #test_nan_reweight()
-
-    #test_bin_clust_components()
+    # kmeans recovery
+    test_kmeans_recovery()
