@@ -60,3 +60,96 @@ def get_all_array_dists(arz: List[np.ndarray]):
             m[i,j] = _array_dist(arz[i], arz[j])
             m[j,i] = m[i,j]
     return m
+
+
+def _sub_cells_helper(targ_inp: np.ndarray,
+                      raw_input_dim: int,
+                      targ_cell_dim: int,
+                      arz: List[np.ndarray],
+                      miss_tolerance: float):
+    """Search target input against raw inputs
+    of all arrays:
+    > if raw input of current array is approximately the same
+    as target raw input AND current array has no NaNs in 
+    targ_cell_dim --> use this arrays target cells
+
+    Args:
+        targ_inp (np.ndarray): raw input against which
+            raw input of arz[i] will be searched
+        raw_input_dim (int): dimension containing raw input
+            assumed to be same across arz
+        targ_cell_dim (int): dimension of cell of interest
+            assumed to be same across arz
+        arz (List[np.ndarray]): raw data
+        miss_tolerance (float): if dist(targ_inp and inp from arz[i])
+            is less than miss_tolerance --> arz[i] will be used
+
+    Returns:
+        np.ndarray: find all useable arz --> take their cells
+            --> average --> return
+    """
+    sub_cells = []
+    for ari in arz:
+        if np.shape(ari)[0] != len(targ_inp):
+            continue
+        if np.sum(np.isnan(ari[:,targ_cell_dim])) > 0:
+            continue
+        di = np.sqrt(np.sum((targ_inp - ari[:,raw_input_dim])**2.))
+        if di < miss_tolerance:
+            sub_cells.append(ari[:,targ_cell_dim])
+    sub_cells = np.array(sub_cells)
+    return np.mean(sub_cells, axis=0)
+
+
+def sub_cells(arz: List[np.ndarray],
+              raw_input_dim: int,
+              miss_tolerance: int):
+    """Substitute missing cells (contains nans) with matching cells
+    from a different animal
+    > Operates on a single set of animals
+    > Checks to ensure raw input aligns
+
+    Args:
+        arz (List[np.ndarray]): each numpy array is a different animal
+            assumes to be T x num_cells
+        raw_input_dim (int): which dimension contains the raw input
+    """
+    ret_arz = []
+    # iter thru animals < cells
+    for i in range(len(arz)):
+        new_ar = []
+        for j in range(np.shape(arz[i])[1]):
+            if np.sum(np.isnan(arz[i][:,j])) > 0:
+                v = _sub_cells_helper(arz[i][:,raw_input_dim],
+                                      raw_input_dim,
+                                      j,
+                                      arz,
+                                      miss_tolerance)
+            else:
+                v = arz[i][:,j]
+            new_ar.append(v)
+        new_ar = np.array(new_ar).T
+        ret_arz.append(new_ar)
+    return ret_arz
+
+
+def filter_cells(arz: List[np.ndarray],
+                 target_cell: int):
+    """filter out animals that are missing
+    target cell
+
+    Args:
+        arz (List[np.ndarray]): each array = 
+            different animal
+        target_cell (int): index of target cell
+            if has nans --> animal filtered out
+    
+    Returns:
+        List[np.ndarray]: animals not missing target
+            cell
+    """
+    ar2 = []
+    for ari in arz:
+        if np.sum(np.isnan(ari[:, target_cell])) < 1:
+            ar2.append(ari)
+    return ar2
