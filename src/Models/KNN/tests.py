@@ -233,6 +233,6 @@ if __name__ == '__main__':
     # test_gmm()
 
     # knn testing
-    # test_knn()
+    test_knn()
 
-    test_bin_clust_components()
+    #test_bin_clust_components()

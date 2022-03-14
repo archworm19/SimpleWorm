@@ -50,15 +50,15 @@ class ANMLFactory:
 
 
     def generate_split(self):
-        """Generate 50/50 split across animals
-        using provided random seed
-
+        """Generate split across animals
         """
-
         # get indices for training vs. test animals:
         train_inds, test_inds = utils.generate_anml_split(self.useable_dat,
                                                             self.gen,
                                                             self.tr_prob)
+
+        print(train_inds)
+        print(test_inds)
 
         # get data offsets:
         offsets = utils.get_data_offsets(self.data)
@@ -146,8 +146,7 @@ class ANMLFactoryMultiSet:
         return np.hstack(flat_train_inds), np.hstack(flat_test_inds)
 
     def generate_split(self):
-        """Generate 50/50 split across animals
-        using provided random seed
+        """Generate split across animals
 
         """
         # get training / testing indices within each set

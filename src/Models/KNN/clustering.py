@@ -175,22 +175,16 @@ class wGMM:
     """
 
     def __init__(self, num_means: int,
-                 tolerance: float = 1e-5,
-                 prior_precision: float = 1.):
+                 tolerance: float = 1e-5):
         """Initialize weighted Gaussian Mixture Model
 
         Args:
             num_means (int): number of clusters/means
             tolerance (float): tolerance for decomposition
                 prevents vanishing variance
-            prior_precision (float): precision that define
-                initial assignment of datapoints to means
-                prior_precision -> 0; uniform probabilities
-                prior_precision -> inf; k-means
         """
         self.num_means = num_means
         self.tolerance = tolerance
-        self.prior_precision = prior_precision
         self.rng = npr.default_rng(66)
         self.km = wKMeans(num_means)
 
@@ -426,21 +420,34 @@ class wGMM:
         # init with kmeans:
         # --> means = num_mean x N
         # --> dist_mat = num_mean x num_sample
-        means, dist_mat = self.km.multi_run(dat, priors, num_iter, 2)
-        # posterior estimate based on distance matrix:
-        # TODO: this is still a bit wonky
-        edist = np.exp(-1. * self.prior_precision * dist_mat /
-                       np.mean(dist_mat)) * priors[None]
-        posts = edist / np.sum(edist, axis=0, keepdims=True)
+        means, _dist_mat = self.km.multi_run(dat, priors, num_iter, 2)
+
         # update raw difference
         # calculate raw difference:
         # --> num_mean x num_sample x N
         raw_diff = dat[None] - means[:, None]
+
+        # initial precision estimate:
+        # outp = num_mean x num_sample x N x N
+        outp = raw_diff[:,:,None] * raw_diff[:,:,:,None]
+        # contract along samples:
+        # --> num_mean x N x N
+        covars = np.sum(priors[None,:,None,None] * outp,
+                      axis = 1)
+        
+        precisions, cov_dets = self._decompose_all_covars(covars)
+
         # repeated iterations of 
-        # > means / covariance updates
         # > posterior probability calc
-        means, covars, mix_coeffs = None, None, None
+        # > means / covariance updates
+        mix_coeffs = np.ones((self.num_means)) * (1. / self.num_means)
         for _ in range(num_iter):
+
+            # posterior calc:
+            posts, _, _ = self.probs(raw_diff, precisions, cov_dets,
+                            mix_coeffs)
+
+            # update --> new means/covars
             means, covars, mix_coeffs = self.update(dat, posts, raw_diff,
                                                     priors)
             # update raw difference
@@ -451,9 +458,6 @@ class wGMM:
             # decompose each covariance matrix
             # --> precision and determinant simul calc
             precisions, cov_dets = self._decompose_all_covars(covars)
-
-            posts, _, _ = self.probs(raw_diff, precisions, cov_dets,
-                                     mix_coeffs)
         
         return means, covars, mix_coeffs, posts
     
