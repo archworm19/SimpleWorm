@@ -4,6 +4,57 @@ import numpy as np
 import numpy.random as npr
 import numpy.linalg as nplg
 
+
+def nan_weight_mu(priors: np.ndarray,
+                  raw_data: np.ndarray):
+    """Nan-Based Weighting of means
+
+    Args:
+        weights (np.ndarray): len num_data_pt array
+        raw_data (np.ndarray): num_data_pt x N array
+
+    Returns:
+        np.ndarray: weights = num_data_pt x N
+            will have nans where cells are missing data
+            all of non-nan columns will sum to 1
+    """
+    # tile weights across cells
+    # --> num_data_pt x N
+    N = np.shape(raw_data)[1]
+    p_tile = np.tile(priors[:,None], (1, N))
+    # nan mask from raw data
+    nan_mask = np.isnan(raw_data)
+    p_tile[nan_mask] = np.nan
+    return p_tile / np.nansum(p_tile, axis=0, keepdims=True)
+
+
+def nan_weight_cov(priors: np.ndarray,
+                   raw_data: np.ndarray):
+    """Nan-based weighting of covariances
+
+    Args:
+        priors (np.ndarray): len num_data_pts array
+        raw_data (np.ndarray): num_data_pts x N array
+
+    Returns:
+        np.ndarray: weights = num_data_pts x N x N
+            where covariance undefined, nan
+            nansums to 1 across data pts (0th axis)
+    """
+    # tile weights across cells
+    # --> num_data_pt x N
+    N = np.shape(raw_data)[1]
+    p_tile = np.tile(priors[:,None], (1, N))
+    # outer product --> num_data_pt x N x N
+    p_outer = p_tile[:,:,None] * p_tile[:,None]
+    # nan mask from raw data:
+    # --> will make more nans
+    raw_outer = np.isnan(raw_data[:,:,None] * raw_data[:,None])
+    p_outer[raw_outer] = np.nan
+    # normalize across datapts:
+    return p_outer / np.nansum(p_outer, axis=0, keepdims=True)
+
+
 class wKMeans:
     """Weighted Kmeans"""
 
@@ -30,7 +81,7 @@ class wKMeans:
         """
         # make num_means x num_sample distance matrix
         # use mean to prevent potential overflow
-        dist_mat = np.mean((dat[None,:] - means[:,None])**2.0, axis=2)
+        dist_mat = np.nanmean((dat[None,:] - means[:,None])**2.0, axis=2)
         # assign data to means --> num_sample array of indices
         clust_assigns = np.argmin(dist_mat, axis=0)
         return clust_assigns, dist_mat
@@ -55,7 +106,7 @@ class wKMeans:
         add_means = []
         num_miss = self.num_means - np.shape(new_means)[0]
         mu_shape = np.shape(new_means[1])
-        for i in num_miss:
+        for _ in num_miss:
             # largest group:
             maxg = np.argmax(grp_size)
             # remake group size
@@ -90,6 +141,8 @@ class wKMeans:
             # normalize priors within cluster
             cprior = priors[dgrp]
             weights = cprior / np.sum(cprior)
+            # TODO: nan reweighting
+            
             means.append(np.sum(dat[dgrp] * weights[:,None], axis=0))
             grp_size.append(len(dgrp))
         # deal with cluster loss

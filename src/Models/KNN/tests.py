@@ -1,10 +1,11 @@
 """Test code for knn + clustering"""
 import itertools
+from Models.KNN.clustering import nan_weight_cov
 import numpy as np
 import numpy.random as npr
 import numpy.linalg as nplg
 import pylab as plt
-from clustering import (wKMeans, wGMM)
+from clustering import (wKMeans, wGMM, nan_weight_mu)
 from binary_clustering import wBMM
 from knn import KNN
 
@@ -221,6 +222,27 @@ def test_bin_clust_components():
     print(post_probs)
 
 
+def test_nan_reweight():
+    priors = np.array([.5, .5])
+    raw_data = np.vstack((np.ones((3,)), 2. * np.ones((3,))))
+    weights = nan_weight_mu(priors, raw_data)
+    print('Means')
+    print('weights')
+    print(weights)
+    raw_data[1,1] = np.nan
+    print('nan weights')
+    print(nan_weight_mu(priors, raw_data))
+
+    print('Covariances')
+    raw_data = np.vstack((np.ones((3,)), 2. * np.ones((3,))))
+    raw_data = raw_data - 1.5
+    print('weights')
+    print(nan_weight_cov(priors, raw_data))
+    raw_data[1,1] = np.nan
+    print('nan weights')
+    print(nan_weight_cov(priors, raw_data))
+
+
 if __name__ == '__main__':
 
     # probs testing:
@@ -233,6 +255,9 @@ if __name__ == '__main__':
     # test_gmm()
 
     # knn testing
-    test_knn()
+    #test_knn()
+
+    # nan testing
+    test_nan_reweight()
 
     #test_bin_clust_components()
