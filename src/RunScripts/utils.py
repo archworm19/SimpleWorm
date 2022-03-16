@@ -153,3 +153,49 @@ def filter_cells(arz: List[np.ndarray],
         if np.sum(np.isnan(ari[:, target_cell])) < 1:
             ar2.append(ari)
     return ar2
+
+
+def get_max_time(setz: List[List[np.ndarray]]):
+    """Search across all animals --> max time
+
+    Args:
+        setz (List[List[np.ndarray]]): inner list = a single set
+            each array is a single animal
+    
+    Returns:
+        int: max time
+    """
+    maxt = -1
+    for cset in setz:
+        for anml in cset:
+            ctime = np.shape(anml)[0]
+            if ctime > maxt:
+                maxt = ctime
+    return maxt
+
+
+def build_standard_id(setz: List[List[np.ndarray]],
+                      set_enums: List[np.ndarray]):
+    """Build standard identity data
+    > 0th dim = time rep
+    > all other dims from set_enums
+
+    Args:
+        setz (List[List[np.ndarray]]): inner list = a single set
+            each array is a single animal
+        set_enums (List[np.ndarray]): representation of the sets
+            will make up all of the non t-dimensions
+    """
+    assert(len(setz) == len(set_enums)), "must have enum for each set"
+    maxt = get_max_time(setz) * 1.
+    id_dat = []
+    for i, cset in enumerate(setz):
+        id_sub = []
+        for anml in cset:
+            numt = np.shape(anml)[0]
+            curt = np.arange(numt) / maxt
+            se_tile = np.tile(np.reshape(set_enums[i], (1,-1)),
+                              (numt, 1))
+            id_sub.append(np.hstack((curt[:,None], se_tile)))
+        id_dat.append(id_sub)
+    return id_dat
