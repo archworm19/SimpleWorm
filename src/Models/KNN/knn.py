@@ -2,6 +2,7 @@
 
 """
 import numpy as np
+import numpy.random as npr
 from Models.KNN.clustering import wGMM
 from Sampler.sampler_iface import SamplerIface
 
@@ -11,8 +12,9 @@ class KNN:
     def __init__(self,
                  num_means: int,
                  variances: np.ndarray,
-                 num_iter = 5,
-                 weight_thresh = 0.99):
+                 num_iter: int = 5,
+                 weight_thresh: float = 0.99,
+                 train_sample_perc: float = 1.):
         """KNN initiation
 
         Args:
@@ -23,10 +25,13 @@ class KNN:
                 their impact (increase --> stronger influence on selection)
                 Expected shape: num_parameter types x flattened independent 
                 variable dim
+            train_sample_perc (float): train sample percent
+                specifies percentage of training set to use
         """
         assert(weight_thresh > 0.0 and weight_thresh < 1.), "weight thresh should be between 0 and 1"
         self.variances = variances
         self.num_iter = num_iter
+        self.train_sample_perc = train_sample_perc
         self.weight_thresh = weight_thresh
         self.num_means = num_means
         self.gmm = wGMM(num_means)
@@ -158,8 +163,27 @@ class KNN:
         priors = priors / np.sum(priors)
         # gmm run on dependent dims
         dat = full_dep[select_inds[:wind]]
-        means, covars, mixing_coeffs, _ = self.gmm.run(dat, priors, self.num_iter)
+        means, covars, mixing_coeffs, _post = self.gmm.run(dat, priors, self.num_iter)
         return means, covars, mixing_coeffs, priors, dat
+
+    def _test_1_sample(self,
+                     tr_win_starts: np.ndarray,
+                     twindow_size: float,
+                     test_indep_sample: np.ndarray,
+                     test_dep_sample: np.ndarray,
+                     tr_full_indep: np.ndarray,
+                     tr_full_dep: np.ndarray,
+                     variance_i: np.ndarray):
+            # TODO: doc string
+            # fit: compare test sample to all train possibilities
+            means, covars, mixing_coeffs, priors, _dat = self._fit_1sample(tr_win_starts,
+                                                                          twindow_size,
+                                                                          test_indep_sample,
+                                                                          tr_full_indep,
+                                                                          tr_full_dep,
+                                                                          variance_i)
+            # test: test log-likelihood on GMMs + test_dep_sample
+            return self._calc_log_like_test(means, covars, mixing_coeffs, priors, test_dep_sample)
 
     def _calc_log_like_train(self, means: np.ndarray, covars: np.ndarray, 
                              mixing_coeffs: np.ndarray, priors: np.ndarray,
@@ -209,12 +233,16 @@ class KNN:
         loglike = self.gmm.log_like(means, covars, mixing_coeffs, priors, dep_dat)
         return loglike
 
-    def _train_epoch_1var(self, indep_dat: np.ndarray, dep_dat: np.ndarray,
+    def _train_epoch_1var(self, train_idxs: np.ndarray,
+                          indep_dat: np.ndarray, dep_dat: np.ndarray,
                           window_starts: np.ndarray, twindow_size: int,
                           variance_i: np.ndarray):
         """Single traininv epoch for single KNN variance
 
         Args:
+            train_idxs (np.ndarray): array of ints
+                which indices to use for training
+                Can search against all windows tho
             indep_dat (np.ndarray): all samples ~ independent variables
                 num_sample x N
             dep_dat (np.ndarray): all samples ~ dependent variables
@@ -230,14 +258,34 @@ class KNN:
             float: log-likelihood averaged across al test windows
         """
         lls = []
-        for i in range(len(indep_dat)):
+        for i in train_idxs:
             mu, sig, mixcoeff, priors, dat = self._fit_1sample(window_starts, twindow_size, indep_dat[i],
                                 indep_dat, dep_dat, variance_i)
             tll = self._calc_log_like_train(mu, sig, mixcoeff, priors, dat)
             lls.append(tll)
+            print(tll)
         return np.mean(np.array(lls))
 
-    def train_epoch(self, train_sampler: SamplerIface):
+    def _select_all_samples(self, train_sampler: SamplerIface):
+        """Pulls all samples
+
+        Args:
+            train_sampler (SamplerIface):
+
+        Returns:
+            np.ndarray: independent data
+            np.ndarray: dependent data
+            np.ndarray: window starts
+        """ 
+        # pull all samples
+        num_samples = train_sampler.get_sample_size()
+        train_sampler.epoch_reset()
+        dat_t, dat_id, window_starts = train_sampler.pull_samples(num_samples)
+        # flatten the data
+        train_indep_dat, train_dep_dat = train_sampler.flatten_samples(dat_t, dat_id)
+        return train_indep_dat, train_dep_dat, window_starts
+
+    def train_epoch(self, train_sampler: SamplerIface, rand_seed: int = 42):
         """Train for 1 epoch
         Select variance that gives best training reconstruction
         Saves data internally
@@ -248,19 +296,23 @@ class KNN:
         
         Returns:
             bool: completion bit
+            List[float]: log-likelihood for each variance set
         """
         # goal: figure out correct variance
         # time window?
         twindow_size = train_sampler.get_twindow_size()
-        # pull all samples
-        num_samples = train_sampler.get_sample_size()
-        dat_t, dat_id, window_starts = train_sampler.pull_samples(num_samples)
-        # flatten the data
-        train_indep_dat, train_dep_dat = train_sampler.flatten_samples(dat_t, dat_id)
+        # pull all samples:
+        train_indep_dat, train_dep_dat, window_starts = self._select_all_samples(train_sampler)
+        # train_idx samples ~ can still search against the rest of the training samples
+        train_idx = np.arange(len(window_starts))
+        rng_obj = npr.default_rng(rand_seed)
+        rng_obj.shuffle(train_idx)
+        train_idx = train_idx[:int(len(window_starts) * self.train_sample_perc)]
+
         best_ind, best_ll = None, None
         all_lls = []
         for i, variance_i in enumerate(self.variances):
-            ll = self._train_epoch_1var(train_indep_dat, train_dep_dat, window_starts,
+            ll = self._train_epoch_1var(train_idx, train_indep_dat, train_dep_dat, window_starts,
                                         twindow_size, variance_i)
             if best_ll is None or ll > best_ll:
                 best_ind = i
@@ -271,3 +323,24 @@ class KNN:
         self.train_dep_dat = train_dep_dat
         self.train_variance = self.variances[best_ind]
         return True, all_lls
+    
+    def test_loglike(self, 
+                     train_sampler: SamplerIface,
+                     test_sampler: SamplerIface,
+                     best_variance_idx: int):
+
+        twindow_size = test_sampler.get_twindow_size()
+        # pull all train samples:
+        train_indep_dat, train_dep_dat, window_starts = self._select_all_samples(train_sampler)
+
+        # iter thru all test samples:
+        test_sampler.epoch_reset()
+        test_t_dat, test_id_dat, _ = test_sampler.pull_samples(1)
+        lls = []
+        while(len(test_t_dat) > 0):
+            test_indep, test_dep = test_sampler.flatten_samples(test_t_dat, test_id_dat)
+            ll = self._test_1_sample(window_starts, twindow_size, test_indep[0], test_dep[0],
+                                     train_indep_dat, train_dep_dat, self.variances[best_variance_idx])
+            lls.append(ll)
+            test_t_dat, test_id_dat, _ = test_sampler.pull_samples(1)
+            print(lls[-1])

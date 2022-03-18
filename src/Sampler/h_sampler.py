@@ -129,10 +129,6 @@ class SmallSampler(SamplerIface):
         # flatten data + apply flattened masks
         fdat_l = []
         for i, d in enumerate(dats):
-            print(d)
-            print(masks[i])
-            print(np.shape(d))
-            print(np.shape(masks[i]))
             dfla = np.reshape(d, (sample_size, -1))
             mfla = self._fselection(sample_size, masks[i])
             vre = np.reshape(dfla[mfla], (sample_size, -1))

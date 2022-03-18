@@ -264,6 +264,23 @@ class wGMM:
         m2 = np.sum(m1 * C, axis=1)
         return m2
     
+    def _apply_bounds(self, vals: np.ndarray,
+                      low_bound: float, hi_bound: float):
+        """Apply bounds to values
+
+        Args:
+            vals (np.ndarray): 
+            low_bound (float): lower bound
+            hi_bound (float): upper bound
+
+        Returns:
+            np.ndarray: bounded values
+        """
+        v2 = 1. * vals
+        v2[vals < low_bound] = low_bound
+        v2[vals > hi_bound] = hi_bound
+        return v2
+
     def _apply_gaussian(self,
                         di: np.ndarray,
                         precision: np.ndarray,
@@ -290,6 +307,11 @@ class wGMM:
 
         dim = np.shape(di)[1]
         m = self._mmult(di, precision, di)
+    
+        # apply bounds to m:
+        # TODO: this should be exposed at top level
+        m = self._apply_bounds(m, -10., 80.)
+
         # numerator --> num_sample
         num = np.exp(-.5 * m)
         # denom --> float
@@ -497,7 +519,17 @@ class wGMM:
         raw_diff = dat[None] - means[:, None]
         precisions, cov_dets = self._decompose_all_covars(covars)
         # mixing probs = num_mean x num_sample array
-        _, mixing_probs, _ = self.probs(raw_diff, precisions, cov_dets, mixing_coeffs)
+        _posts, mixing_probs, _fors = self.probs(raw_diff, precisions, cov_dets, mixing_coeffs)
+
+        print('WUT')
+        print(mixing_coeffs)
+        print(cov_dets)
+        print(np.shape(dat))
+        print(_posts)
+        print(mixing_probs)
+        print(_fors)
+        input('cont?')
+
         # log sum within each cluster:
         # --> len num_sample
         logsum = np.log(np.sum(mixing_probs, axis=0))

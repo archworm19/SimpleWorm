@@ -6,6 +6,7 @@
     > Look at training / test performance as decrease variance of time variable
 
 """
+from statistics import variance
 from typing import List
 import numpy as np
 import pylab as plt
@@ -13,6 +14,7 @@ import data_loader
 import utils
 
 from Sampler.experiments import build_anml_factory_multiset
+from Models.KNN import knn
 
 
 # TODO: this should be moved to some other file
@@ -79,6 +81,7 @@ if __name__ == '__main__':
 
     # TODO: run params ~ variances / timewindows
     twindow_size = 24
+    train_sample_perc = 1. / twindow_size
 
     # set enumerations ~ will be incorporated into id_dat
     # standard set ordering = [Zim+op50, Npal+op50, Zim+buffer]
@@ -125,17 +128,19 @@ if __name__ == '__main__':
                                                               id_indep_mask,
                                                               rand_seed=42)
     
-    # TESTING ~ get a sample:
+    # get the samplers
     train_sampler, test_sampler = train_factory.generate_split()
-    t_sample, id_sample, t0s_sampler = train_sampler.pull_samples(500)
-    print(np.shape(t_sample))
-    flat_indep_sample, flat_dep_sample = train_sampler.flatten_samples(t_sample, id_sample)
-    print(np.shape(flat_indep_sample))
-    print(flat_indep_sample)
-    print(np.shape(flat_dep_sample))
-    print(flat_dep_sample)
-    plt.figure()
-    for i in range(0, np.shape(flat_dep_sample)[0], twindow_size):
-        x = np.arange(i, i + twindow_size)
-        plt.plot(x, flat_dep_sample[i])
-    plt.show()
+
+    # TESTING: time variance alteration
+    t_vars = np.array([1., 0.1, 0.01])
+    variances = np.ones((len(t_vars), 5))
+    variances[:,0] = t_vars
+    # TODO: training stuff is below here
+    knn_model = knn.KNN(3, variances, train_sample_perc=(1. / twindow_size))
+    # _, lls = knn_model.train_epoch(train_sampler)
+    # print(lls)
+
+    # TESTING: test log-like
+    lls = knn_model.test_loglike(train_sampler, test_sampler, 2)
+    print(np.mean(lls))
+
