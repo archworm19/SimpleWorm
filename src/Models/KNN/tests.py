@@ -58,6 +58,20 @@ def test_gmm_probs():
     input('cont?')
 
 
+def test_gauss():
+    # goal: figure out a good confidence strategy
+    G = wGMM(1)
+    dim = 3
+    covar = np.eye(dim) * 1e-6
+    prec, det = G._decompose_all_covars(covar[None])
+    print('GMM probs')
+    print(prec)
+    print(det)
+    raw_diff = np.zeros((1,1,3))
+    print(G.probs(raw_diff, prec[None], det[None], np.array([1.])))
+    input('cont?')
+
+
 def test_gmm():
     # NOTE: need scipy to run test
     # more specific testing:
@@ -225,8 +239,10 @@ def test_kmeans_recovery():
 
 if __name__ == '__main__':
 
+    test_gauss()
+
     # probs testing:
-    # test_gmm_probs()
+    test_gmm_probs()
 
     # kmeans testing
     # test_kmeans()

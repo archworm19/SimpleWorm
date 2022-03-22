@@ -80,7 +80,7 @@ def _test_replacement(cset_og: List[np.ndarray],
 if __name__ == '__main__':
 
     # TODO: run params ~ variances / timewindows
-    twindow_size = 24
+    twindow_size = 12
     train_sample_perc = 1. / twindow_size
 
     # set enumerations ~ will be incorporated into id_dat
@@ -132,12 +132,12 @@ if __name__ == '__main__':
     train_sampler, test_sampler = train_factory.generate_split()
 
     # TESTING: time variance alteration
-    t_vars = np.array([1., 0.1, 0.01])
+    t_vars = np.array([.0001, 1., 0.1, 0.01])
     variances = np.ones((len(t_vars), 5))
     variances[:,0] = t_vars
     # TODO: training stuff is below here
-    knn_model = knn.KNN(3, variances, train_sample_perc=(1. / twindow_size))
-    # _, lls = knn_model.train_epoch(train_sampler)
+    knn_model = knn.KNN(8, variances, train_sample_perc=(1. / twindow_size))
+    _, lls = knn_model.train_epoch(train_sampler)
     # print(lls)
 
     # TESTING: test log-like

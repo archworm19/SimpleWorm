@@ -181,16 +181,27 @@ class wGMM:
     """
 
     def __init__(self, num_means: int,
-                 tolerance: float = 1e-5):
+                 tolerance: float = 1e-4,
+                 tolerance_scale: float = 1e-32,
+                 gauss_tolerance: float = 1e-10):
         """Initialize weighted Gaussian Mixture Model
 
         Args:
             num_means (int): number of clusters/means
-            tolerance (float): tolerance for decomposition
-                prevents vanishing variance
+            tolerance (float): tolerance for each each singular
+                value of the covariance matrix. Singular
+                values cannot go below this value.
+            tolerance_scale (float): if determinant of covariance
+                matrix drops below this value --> singular
+                values are scaled so that determinant = tolerance_scale
+            gauss_tolerance (float): if value in gaussian
+                exponential is < gauss_tolerance -->
+                resulting probability treated as 0
         """
         self.num_means = num_means
         self.tolerance = tolerance
+        self.tolerance_scale = tolerance_scale
+        self.gauss_tolerance = gauss_tolerance
         self.rng = npr.default_rng(66)
         self.km = wKMeans(num_means)
 
@@ -218,6 +229,19 @@ class wGMM:
 
         # determinant = product of singular values
         det = np.prod(s)
+
+        # tolerance scaling:
+        # det = s0 * s1 * s2 * ...
+        # target det = tolerance_scale if det below
+        # -->
+        # tolerance_scale = s0*k * s1*k * ...
+        # k = tolerance factor
+        # k^dim = tolerance_scale / det
+
+        if det < self.tolerance_scale:
+            tol_scale_factor = (self.tolerance_scale / det) ** (1. / len(s))
+            s = s * tol_scale_factor
+            det = self.tolerance_scale
 
         # invert s
         # since diagonal --> elem-wise inverse
@@ -264,22 +288,6 @@ class wGMM:
         m2 = np.sum(m1 * C, axis=1)
         return m2
     
-    def _apply_bounds(self, vals: np.ndarray,
-                      low_bound: float, hi_bound: float):
-        """Apply bounds to values
-
-        Args:
-            vals (np.ndarray): 
-            low_bound (float): lower bound
-            hi_bound (float): upper bound
-
-        Returns:
-            np.ndarray: bounded values
-        """
-        v2 = 1. * vals
-        v2[vals < low_bound] = low_bound
-        v2[vals > hi_bound] = hi_bound
-        return v2
 
     def _apply_gaussian(self,
                         di: np.ndarray,
@@ -303,20 +311,23 @@ class wGMM:
             np.ndarray: forward probs = len num_sample
         """
 
-        # TODO: tolerance stuff
-
         dim = np.shape(di)[1]
         m = self._mmult(di, precision, di)
     
-        # apply bounds to m:
-        # TODO: this should be exposed at top level
-        m = self._apply_bounds(m, -10., 80.)
+        # underflow protection:
+        tol_mask = m < self.gauss_tolerance
+        m[tol_mask] = 0.
 
         # numerator --> num_sample
         num = np.exp(-.5 * m)
+
+        # bring back tolerance
+        num[tol_mask] = 0.
+
         # denom --> float
         denom = np.sqrt(((2. * np.pi)**dim)
                          * cov_det)
+
         return num / denom
 
     def probs(self,
@@ -520,16 +531,6 @@ class wGMM:
         precisions, cov_dets = self._decompose_all_covars(covars)
         # mixing probs = num_mean x num_sample array
         _posts, mixing_probs, _fors = self.probs(raw_diff, precisions, cov_dets, mixing_coeffs)
-
-        print('WUT')
-        print(mixing_coeffs)
-        print(cov_dets)
-        print(np.shape(dat))
-        print(_posts)
-        print(mixing_probs)
-        print(_fors)
-        input('cont?')
-
         # log sum within each cluster:
         # --> len num_sample
         logsum = np.log(np.sum(mixing_probs, axis=0))
