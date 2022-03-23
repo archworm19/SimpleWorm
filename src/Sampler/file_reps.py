@@ -4,6 +4,7 @@
 """
 import dataclasses
 from typing import List
+import numpy as np
 
 
 # TODO: I still don't really have a design figured out
@@ -21,11 +22,17 @@ from typing import List
 
 @dataclasses.dataclass
 class SingleFile:
+    """Assumed shapes
+    t_file: T x d1 x d2 x ...
+    id_file: T x M
+        T = number of time points
+    """
     set_id: int
     t_file_name: str  # file name for time data
     id_file_name: str  # file name for id data
     t_file_shape: List[int]  # shape of numpy array in memmap file
     id_file_shape: List[int]  # ""
+    dtypes: str
 
 
 class FileSet:
@@ -73,3 +80,27 @@ def map_idx_to_file(root_set: FileSet, set_idx: List[int], file_idx: int):
         fset = fset.get_subset(sidx)
     # get file:
     return fset.get_file(file_idx)
+
+
+def open_file(target_file: SingleFile):
+    """Open numpy memmap file
+    Opening file should have very little memory hit
+    ... there will be some memory cost to doing operations
+    on returned elements via caching
+
+    Args:
+        target_file (SingleFile):
+
+    Returns:
+        np.ndarray: time data
+            memmap file that can be treated like numpy array
+            T x d1 x d2 x ...
+        np.ndarray: id data
+            memmap file
+            T x M
+    """
+    t_dat = np.memmap(target_file.t_file_name, dtype=target_file.dtypes,
+                      mode='r+', shape=target_file.t_file_shape)
+    id_dat = np.memmap(target_file.id_file_name, dtype=target_file.dtypes,
+                       mode='r+', shape=target_file.id_file_shape)
+    return t_dat, id_dat

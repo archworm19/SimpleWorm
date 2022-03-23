@@ -4,11 +4,24 @@
     if an animal appears in train --> it will
     not appear in test
 """
+import dataclasses
 from typing import List
 import numpy as np
 import numpy.random as npr
 import Sampler.utils as utils
 from Sampler.h_sampler import SmallSampler
+
+
+@dataclasses.dataclass
+class FlatDat:
+    """3 related files created by the factory
+    time_window_starts_fn: dictates the sampling window"""
+    t_file_name: str
+    id_file_name: str
+    time_window_starts_fn: str
+    t_file_shape: List[int]
+    id_file_dim0: int
+    id_file_dim1: int
 
 
 class ANMLFactoryMultiSet:
@@ -28,6 +41,7 @@ class ANMLFactoryMultiSet:
         """Lists = independent sets
         Arrays = different animals
         Sampling is done within each set
+        NOTE: np.ndarrays can also be np memmap arrays
 
         Args:
             data (List[List[np.ndarray]]): [description]
@@ -73,13 +87,28 @@ class ANMLFactoryMultiSet:
             offset += len(self.useable_dat[i])
         return np.hstack(flat_train_inds), np.hstack(flat_test_inds)
 
-    def generate_split(self):
-        """Generate split across animals
 
+    def generate_split(self, save_file_root: str = 'TEMP'):
+        """Generate split across animals
         """
         # get training / testing indices within each set
-        # NOTE: after this step: all data can be handled as flat
         flat_train_inds, flat_test_inds = self._split_all_sets()
+
+        # initialize the memmap arrays:
+        # get sizes:
+        train_lens, test_lens = [], []
+        count = 0
+        for cset in self.data:
+            for canml in cset:
+                v = len(canml) - self.twindow_size
+                if flat_train_inds[count]:
+                    train_lens.append(v)
+                if flat_test_inds[count]:
+                    test_lens.append(v)
+        
+        train_t_file_shape = [sum(train_lens), self.twindow_size] + np.shape(self.data[0][0][0])
+        test_t_file_shape = [sum(test_lens), self.twindow_size] + np.shape(self.data[0][0][0])
+        
 
         # flatten other data:
         flat_dat, flat_id = [], []
