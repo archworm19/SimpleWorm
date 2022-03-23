@@ -7,7 +7,16 @@ from typing import List
 
 
 # TODO: I still don't really have a design figured out
-# ... I guess I would need some sort of conversions system
+# ... I guess I would need some sort of conversion system for the sub_processes
+# What I'm worried about
+# 1. passing in memmap stuff to sub-processes = wierd behavior with caching...
+# 2. Reloading the memmap file for every sample will be crazy slow... right?
+# ... the point of memmap is that we treat it as array and can take advantage of caching
+# ...
+# Soln? 
+# > Pass in unitialized Sampler to each child process
+# > Each child process calls [Sampler].data_initialize
+# > > this Sampler loads all interesting data from all files --> operates on these
 
 
 @dataclasses.dataclass
