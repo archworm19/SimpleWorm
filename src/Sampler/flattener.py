@@ -1,113 +1,39 @@
-"""
-    Hierarchical Samplers
-
-    NOTE: all samplers designs with timeseries in mind
-    --> return shape = N x M x Twin
-    Twin = timewindow
-
-    DESIGN ISSUE
-    > Where are experiments implemented?
-    > > dependent vs. independent samples
-    > Does it have to be implemented at sampler level?
-    > Or: can sampler be oblivious?
-    IDEA:
-    > timeseries vs. id data must be stored separately
-    > > cuz of their different nature
-    > specify independent / dependent variables
-    > using an array or dict!!!
-    > Thus: sampler can be agnostic
-    > Factory? can be agnostic ~ just pass list/dict thru
-    > builders will specify experiments!!
-
+""""  
+    Flattener and Unflattener
+    > Operates on numpy (or memmap stuff)
+    > Doesn't handle sampling
+    > Operates on a sample
 """
 from typing import List
 import numpy as np
-import numpy.random as npr
-from Sampler.sampler_iface import SamplerIface
+from Sampler.file_reps import SingleFile
 
 
-class SmallSampler(SamplerIface):
-    """Small Hierarchical sampler
-    Small size --> store the whole dataset in memory"""
+class Flattener:
+    """Handles flattening and unflattening for a
+    given experiment"""
 
     def __init__(self,
-                 data: np.ndarray,
-                 ident_dat: np.ndarray,
-                 window_starts: np.ndarray,
-                 window_size: int,
                  dep_t_mask: np.ndarray,
                  dep_id_mask: np.ndarray,
                  indep_t_mask: np.ndarray,
                  indep_id_mask: np.ndarray):
-        """Initialize HSampler
+        """Initialize Flattener
 
         Args:
-            data (np.ndarray): T x ... array
-                where T = for time windows
-                data assumed to be timeseries
-            ident_dat (np.ndarray) T x q array of
-                identity indicators. Identity indicators
-                are different fdom data because they are
-                assumed to NOT be a timeseries
-                Typical example: q = 1 and all entries
-                indicate source animal
-            window_starts: beginning of legal 
-                time windows
-            window_size (np.ndarray): size of each timewindow
             masks (np.ndarray): boolean masks for selection of
                 independent/dependent dims for timeseries and
                 id data
+
+                t masks = T x ...
+                    T = time window size
+                    rest of dims should match base data
+                id masks = len M
         """
-        self.data = data
-        self.ident_dat = ident_dat
-        self.window_starts = window_starts
-        self.window_size = window_size
         self.dep_t_mask = dep_t_mask
         self.dep_id_mask = dep_id_mask
         self.indep_t_mask = indep_t_mask
         self.indep_id_mask = indep_id_mask
-        self.next_sample = 0
-
-    def shuffle(self, rng_seed: int = 42):
-        """Shuffle 
-
-        Args:
-            rng_seed (int): [description]. Defaults to 42.
-        """
-        dr = npr.default_rng(rng_seed)
-        dr.shuffle(self.window_starts)
-
-    def epoch_reset(self):
-        """Restart sampling for new epoch
-        """
-        self.next_sample = 0
-
-    def pull_samples(self, num_samples: int):
-        """Pull next [num_samples] samples
-
-        Args:
-            num_samples (int):
-
-        Returns:
-            np.ndarray: num_samples x T x ... array
-                timeseries data
-            np.ndarray: num_samples x q array
-                identity indicator data
-                Ex: what worm is this coming from?
-            np.ndarray: starting timepoints of each
-                timewindow
-                len num_samples
-        """
-        batch, ident_batch, rwindow_starts = [], [], []
-        for i in range(self.next_sample, min(self.next_sample + num_samples,
-                                             len(self.window_starts))):
-            t0 = int(self.window_starts[i])
-            batch.append(self.data[t0:t0+self.window_size])
-            ident_batch.append(self.ident_dat[t0])
-            rwindow_starts.append(t0)
-        # update sample ptr:
-        self.next_sample += num_samples
-        return np.array(batch), np.array(ident_batch), rwindow_starts
 
     def _fselection(self, num_sample: int, mask: np.ndarray):
         """ar_sample has multiple samples. Mask does not
@@ -133,10 +59,10 @@ class SmallSampler(SamplerIface):
             fdat_l.append(vre)
         return np.hstack(fdat_l)
 
-    def flatten_samples(self,
-                        dat_tseries: np.ndarray,
-                        dat_ids: np.ndarray):
-        """flatten samples
+    def _flatten_samples(self,
+                         dat_tseries: np.ndarray,
+                         dat_ids: np.ndarray):
+        """flatten samples (internal = operates on numpy arrays; not SingleFile)
         Takes in structured timeseries and identity batch data
         > spits it into independent and dependent data
         > flattens both to [num_sample] x m_i
@@ -162,8 +88,12 @@ class SmallSampler(SamplerIface):
                                       raw[2:],
                                       maskz[2:])
         return indep2, dep2
-    
-    # TODO: needs reworking with masks
+
+    def flatten_samples(self,
+                        target_files: List[SingleFile],
+                        t0s: List[int]):
+        AYO
+
     def unflatten_samples(self,
                           dat_flat: np.ndarray,
                           indep: bool = True):
@@ -223,9 +153,3 @@ class SmallSampler(SamplerIface):
             funf[fmask] = ff
             fin_unflat.append(np.reshape(funf, og_shape))
         return fin_unflat[0], fin_unflat[1]
-
-    def get_sample_size(self):
-        return len(self.window_starts)
-
-    def get_twindow_size(self):
-        return self.window_size

@@ -7,7 +7,7 @@ from typing import List
 import numpy as np
 import numpy.random as npr
 import Sampler.utils as utils
-from Sampler.anml_factory import ANMLFactory, ANMLFactoryMultiSet
+from Sampler.anml_factory import ANMLFactoryMultiSet
 from Sampler.even_split_factory import SSFactoryEvenSplit
 
 # utilities
