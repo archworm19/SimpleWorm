@@ -7,19 +7,6 @@ from typing import List
 import numpy as np
 
 
-# TODO: I still don't really have a design figured out
-# ... I guess I would need some sort of conversion system for the sub_processes
-# What I'm worried about
-# 1. passing in memmap stuff to sub-processes = wierd behavior with caching...
-# 2. Reloading the memmap file for every sample will be crazy slow... right?
-# ... the point of memmap is that we treat it as array and can take advantage of caching
-# ...
-# Soln? 
-# > Pass in unitialized Sampler to each child process
-# > Each child process calls [Sampler].data_initialize
-# > > this Sampler loads all interesting data from all files --> operates on these
-
-
 @dataclasses.dataclass
 class SingleFile:
     """Assumed shapes
@@ -27,43 +14,24 @@ class SingleFile:
     id_file: T x M
         T = number of time points
     """
-    set_id: int
+    idn: int
     t_file_name: str  # file name for time data
     id_file_name: str  # file name for id data
     t_file_shape: List[int]  # shape of numpy array in memmap file
     id_file_shape: List[int]  # ""
     dtypes: str
 
-
+@dataclasses.dataclass
 class FileSet:
+    sub_sets: List  # List[FileSet]
+    files: List[SingleFile]
 
-    def __init__(self, sub_sets: List,
-                 files: List[SingleFile] = None):
-        """File Set can have either child sets (children) or
-        a set of files (leaf)
 
-        Args:
-            sub_sets (List): List[FileSet]
-            files (List[SingleFile]): None unless leaf
-        """
-        self.sub_sets = sub_sets
-        self.files = files
-    
-    def get_file(self, file_ind: int):
-        """Get file if available
-
-        Args:
-            file_ind (int): file index
-
-        Returns:
-            SingleFile: 
-        """
-        if self.files is not None:
-            return self.files[file_ind]
-        return None
-    
-    def get_subset(self, subset_ind: int):
-        return self.sub_sets[subset_ind]
+def clone_single_file(old_file: SingleFile):
+    # cheap operation cuz just filenames and metadata:
+    return SingleFile(old_file.idn, old_file.t_file_name,
+                      old_file.id_file_name, old_file.t_file_shape,
+                      old_file.id_file_shape, old_file.dtypes)
 
 
 def map_idx_to_file(root_set: FileSet, set_idx: List[int], file_idx: int):
@@ -77,9 +45,9 @@ def map_idx_to_file(root_set: FileSet, set_idx: List[int], file_idx: int):
     fset = root_set
     # iter thru subsets
     for sidx in set_idx:
-        fset = fset.get_subset(sidx)
+        fset = fset.sub_sets[sidx]
     # get file:
-    return fset.get_file(file_idx)
+    return fset.files[file_idx]
 
 
 def open_file(target_file: SingleFile):
@@ -104,3 +72,43 @@ def open_file(target_file: SingleFile):
     id_dat = np.memmap(target_file.id_file_name, dtype=target_file.dtypes,
                        mode='r+', shape=target_file.id_file_shape)
     return t_dat, id_dat
+
+
+def _get_depths_helper(cset: FileSet,
+                       cdepth: int):
+    if len(cset.sub_sets) == 0:
+        return [cdepth]
+    ret_depths = []
+    for child in cset.sub_sets:
+        ret_depths.extend(_get_depths_helper(child, cdepth+1))
+    return ret_depths
+
+
+def get_depths(root_set: FileSet):
+    """Get distance to each leaf of the tree
+
+    Args:
+        root_set (FileSet):
+
+    Returns:
+        List[int]
+    """
+    return _get_depths_helper(root_set, 0)
+
+
+def get_files(cset: FileSet):
+    """Get all file leaves
+
+    Args:
+        cset (FileSet): current set
+            should typically be the root of the set tree
+
+    Returns:
+        List[SingleFile]
+    """
+    if len(cset.sub_sets) == 0:
+        return cset.files
+    ret_files = []
+    for child in cset.sub_sets:
+        ret_files.extend(get_files(child))
+    return ret_files
