@@ -3,6 +3,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# I name temp file .dat
+*.dat
+
 # C extensions
 *.so
 
