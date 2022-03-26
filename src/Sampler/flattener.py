@@ -2,11 +2,10 @@
     Flattener and Unflattener
     > Operates on numpy (or memmap stuff)
     > Doesn't handle sampling
-    > Operates on a sample
+    > Operates on a batch (set of samples)
 """
 from typing import List
 import numpy as np
-from Sampler.file_reps import SingleFile
 
 
 class Flattener:
@@ -59,10 +58,10 @@ class Flattener:
             fdat_l.append(vre)
         return np.hstack(fdat_l)
 
-    def _flatten_samples(self,
-                         dat_tseries: np.ndarray,
-                         dat_ids: np.ndarray):
-        """flatten samples (internal = operates on numpy arrays; not SingleFile)
+    def flatten_samples(self,
+                        dat_tseries: np.ndarray,
+                        dat_ids: np.ndarray):
+        """flatten samples
         Takes in structured timeseries and identity batch data
         > spits it into independent and dependent data
         > flattens both to [num_sample] x m_i
@@ -70,6 +69,7 @@ class Flattener:
         Args:
             dat_tseries (np.ndarray): num_samples x T x ... array
             dat_ids (np.ndarray): num_sampels x M array
+                NOTE: both can be np memmap arrays too
 
         Returns:
             np.ndarray: independent flattened data
@@ -88,11 +88,6 @@ class Flattener:
                                       raw[2:],
                                       maskz[2:])
         return indep2, dep2
-
-    def flatten_samples(self,
-                        target_files: List[SingleFile],
-                        t0s: List[int]):
-        AYO
 
     def unflatten_samples(self,
                           dat_flat: np.ndarray,

@@ -1,12 +1,18 @@
 """
     File Wrapper Classes
     Handles hierarchical mapping
+
+    NOTE: assumes file follows SingleFile
+    ... could easily be an interface
+
 """
 import dataclasses
 from typing import List
 import numpy as np
 
 
+# NOTE: should maybe just be a generic SingleFile
+# --> this would be a single version of it... easy fix if needed
 @dataclasses.dataclass
 class SingleFile:
     """Assumed shapes
@@ -20,6 +26,7 @@ class SingleFile:
     t_file_shape: List[int]  # shape of numpy array in memmap file
     id_file_shape: List[int]  # ""
     dtypes: str
+
 
 @dataclasses.dataclass
 class FileSet:
