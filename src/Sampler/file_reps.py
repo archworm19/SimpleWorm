@@ -81,6 +81,41 @@ def open_file(target_file: SingleFile):
     return t_dat, id_dat
 
 
+def save_file(file_id: int, file_root: str,
+              t_ar: np.ndarray, id_ar: np.ndarray):
+    """Create numpy memmap files from numpy arrays
+    --> return SingleFile that points to these files
+    NOTE: the created memmaps will be garbage collected
+    --> need to reload if want to use
+
+    Args:
+        file_id (int):
+        file_root (str): file_root that will be incorporated
+            into the filenames
+        t_ar (np.ndarray): timeseries array
+        id_ar (np.ndarray): identity array
+
+    Returns:
+        SingleFile: 
+    """
+    assert(t_ar.dtype == id_ar.dtype), "arrays must have same type"
+    t_file_name = "{0}_{1}".format(file_root, "t_file.dat")
+    id_file_name = "{0}_{1}".format(file_root, "id_file.dat")
+    # make the file --> copy data in
+    t_dat = np.memmap(t_file_name, dtype=t_ar.dtype,
+                      mode='w+', shape=np.shape(t_ar))
+    id_dat = np.memmap(id_file_name, dtype=id_ar.dtype,
+                       mode='w+', shape=np.shape(id_ar))
+    t_dat[:] = t_ar[:]
+    id_dat[:] = id_ar[:]
+    return SingleFile(file_id,
+                      t_file_name,
+                      id_file_name,
+                      np.shape(t_ar),
+                      np.shape(id_ar),
+                      t_ar.dtype)
+
+
 def _get_depths_helper(cset: FileSet,
                        cdepth: int):
     if len(cset.sub_sets) == 0:

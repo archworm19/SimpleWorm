@@ -2,8 +2,9 @@
     > file_reps
     > set_sampling
     > TODO: sampling"""
+import numpy as np
 import numpy.random as npr
-from Sampler import set_sampling, file_reps
+from Sampler import set_sampling, file_reps, drawer
 
 def _make_fake_tree():
     # 2 top-level sets
@@ -80,8 +81,57 @@ def test_anml_sampler():
         assert(fi.idn in exp_idns)
 
 
+def _make_fake_files():
+    # make a single set with 3 animals
+    tar0 = np.zeros((5, 8, 3))
+    tar1 = np.ones((10, 8, 3))
+    tar2 = np.ones((15, 8, 3)) * 2
+    id0 = np.vstack((np.arange(5), np.zeros(5,))).T
+    id1 = np.vstack((np.arange(10), np.ones((10,)))).T
+    id2 = np.vstack((np.arange(15), 2*np.ones((15,)))).T
+    tz = [tar0, tar1, tar2]
+    idz = [id0, id1, id2]
+    filez = []
+    file_root = 'TEMP'
+    for i in range(len(tz)):
+        filez.append(file_reps.save_file(i, file_root + str(i), 
+                                         tz[i], idz[i]))
+    # package into single set:
+    return file_reps.FileSet([], filez)
+
+
+def test_drawer():
+    root = _make_fake_files()
+    twindow_size = 3
+    D = drawer.TDrawer(root, twindow_size)
+    avail_samples = D.get_available_samples()
+    assert(avail_samples == 24)
+    # idxs for file 0:
+    tsamp, idsamp = D.draw_samples([0, 1, 2])
+    assert(np.shape(tsamp) == (3, 3, 8, 3))
+    assert(np.sum(tsamp != 0) < 1)
+    assert(np.shape(idsamp) == (3, 2))
+    assert(idsamp[0,0] == 0)
+    assert(idsamp[0,1] == 0)
+    # idxs for file 1:
+    tsamp, idsamp = D.draw_samples(np.arange(3,3+8))
+    assert(np.shape(tsamp) == (8, 3, 8, 3))
+    assert(np.sum(tsamp != 1) < 1)
+    assert(np.shape(idsamp) == (8, 2))
+    assert(idsamp[0,0] == 0)
+    assert(idsamp[0,1] == 1)
+    # idxs for file 2:
+    tsamp, idsamp = D.draw_samples(np.arange(11, 11+13))
+    assert(np.shape(tsamp) == (13, 3, 8, 3))
+    assert(np.sum(tsamp != 2) < 1)
+    assert(np.shape(idsamp) == (13, 2))
+    assert(idsamp[0,0] == 0)
+    assert(idsamp[0,1] == 2)
+
+
 if __name__ == '__main__':
     test_depth()
     test_idx_mapping()
     test_sample_helper()
     test_anml_sampler()
+    test_drawer()

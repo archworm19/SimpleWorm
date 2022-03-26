@@ -3,16 +3,11 @@
 
     Operate on file representations (file_reps.py)
 
-    TODO: rename file == general enough to handle more than just animal sampling
-
     Design:
     > Everything operates on the tree
     > > FileSet tree
     > Sampling returns a subset of the tree
     > Rely on file names for record
-    
-    TODO: how draw samples?
-    > For now --> provide a get_all_files function?
 
 """
 from typing import List

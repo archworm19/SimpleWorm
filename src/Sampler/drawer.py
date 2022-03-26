@@ -43,7 +43,7 @@ class TDrawer:
             t_dat, _id_dat = file_reps.open_file(cfile)
             file_idns.append(cfile.idn)
             # increment ct0 to next file
-            ct0 += np.shape(t_dat)[0] - self.twindow_size
+            ct0 += 1 + np.shape(t_dat)[0] - self.twindow_size
         return np.array(t0s), file_idns, ct0
 
     def get_available_samples(self):
@@ -80,9 +80,10 @@ class TDrawer:
             t_dat, id_dat = file_reps.open_file(self.filez[targ_file_idx])
             self.tdat[targ_file_idx] = t_dat
             self.iddat[targ_file_idx] = id_dat
+
         # sample in time --> tile t:
         # raw_t = twindow_size x ...
-        raw_t = self.tdat[targ_file_idx][t0_offset:self.twindow_size]
+        raw_t = self.tdat[targ_file_idx][t0_offset:t0_offset+self.twindow_size]
         raw_id = self.iddat[targ_file_idx][t0_offset]
         return raw_t, raw_id
 
