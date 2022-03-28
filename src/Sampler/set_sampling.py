@@ -39,7 +39,8 @@ def _sample_helper(new_set: file_reps.FileSet,
         sfinds = _sample_inds(rng, num_files, sample_probs[0])
         sel_files = []
         for sfi in sfinds:
-            sel_files.append(file_reps.sample_file(cur_set.files[sfi]))
+            sel_files.append(file_reps.sample_file_subset(cur_set.files[sfi],
+                                                          t0_sample_prob, rng))
         new_set.files = sel_files
         return None
     else:
@@ -49,7 +50,7 @@ def _sample_helper(new_set: file_reps.FileSet,
             new_new_set = file_reps.FileSet([], None)
             new_set.sub_sets.append(new_new_set)
             child = cur_set.sub_sets[ss]
-            _sample_helper(new_new_set, rng, child, sample_probs[1:])
+            _sample_helper(new_new_set, rng, child, sample_probs[1:], t0_sample_prob)
 
 
 def get_anml_sample(root_set: file_reps.FileSet,

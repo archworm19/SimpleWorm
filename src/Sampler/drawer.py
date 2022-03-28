@@ -33,6 +33,7 @@ class TDrawer:
         N = len(self.t0s)
         self.tdat = [None] * N
         self.iddat = [None] * N
+        self.t0dat = [None] * N
 
     def _init_file_map(self, filez: List[file_reps.SingleFile]):
         """Initialize the internal file map
@@ -49,10 +50,10 @@ class TDrawer:
         ct0 = 0
         for cfile in filez:
             t0s.append(ct0)
-            t_dat, _id_dat = file_reps.open_file(cfile)
+            _t_dat, _id_dat, t0_samples = file_reps.open_file(cfile)
             file_idns.append(cfile.idn)
             # increment ct0 to next file
-            ct0 += 1 + np.shape(t_dat)[0] - self.twindow_size
+            ct0 += 1 + len(t0_samples) - self.twindow_size
         return np.array(t0s), file_idns, ct0
 
     def get_available_samples(self):
@@ -86,14 +87,16 @@ class TDrawer:
         t0_offset = idx - self.t0s[targ_file_idx]
         # singleton handling:
         if self.tdat[targ_file_idx] is None:
-            t_dat, id_dat = file_reps.open_file(self.filez[targ_file_idx])
+            t_dat, id_dat, sample_t0s = file_reps.open_file(self.filez[targ_file_idx])
             self.tdat[targ_file_idx] = t_dat
             self.iddat[targ_file_idx] = id_dat
+            self.t0dat[targ_file_idx] = sample_t0s
 
         # sample in time --> tile t:
         # raw_t = twindow_size x ...
-        raw_t = self.tdat[targ_file_idx][t0_offset:t0_offset+self.twindow_size]
-        raw_id = self.iddat[targ_file_idx][t0_offset]
+        fin_t0 = self.t0dat[targ_file_idx][t0_offset]
+        raw_t = self.tdat[targ_file_idx][fin_t0:fin_t0+self.twindow_size]
+        raw_id = self.iddat[targ_file_idx][fin_t0]
         return raw_t, raw_id
 
     def draw_samples(self, idxs: List[int]):

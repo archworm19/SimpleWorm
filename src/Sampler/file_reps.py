@@ -9,6 +9,7 @@
 import dataclasses
 from typing import List
 import numpy as np
+import numpy.random as npr
 
 
 # NOTE: should maybe just be a generic SingleFile
@@ -26,7 +27,7 @@ class SingleFile:
     t0_sample_file_name: str  # file name for t0 samples
     t_file_shape: List[int]  # shape of numpy array in memmap file
     id_file_shape: List[int]  # ""
-    t0_file_shape: int  # number of t0s sampled for the current file
+    t0_file_shape: List[int]  # number of t0s sampled for the current file
     dtypes: str
     t0_sample_dtype: str
 
@@ -158,6 +159,26 @@ def sample_file(file: SingleFile,
                       np.shape(t0_samples),
                       file.dtypes,
                       t0_samples.dtype)
+
+
+def sample_file_subset(file: SingleFile,
+                       sample_prob: float,
+                       rng: npr.Generator):
+    """Sample t0s within a file
+    Taking a subset of the current t0s
+
+    Args:
+        file (SingleFile): target file
+        sample_prob (float): sample probability
+        rng (npr.Generator):
+
+    Returns:
+        SingleFile: copy of file with t0 fields altered
+    """
+    _, _, t0_samples = open_file(file)
+    rz = rng.random(len(t0_samples)) <= sample_prob
+    new_t0s = t0_samples[rz]
+    return sample_file(file, new_t0s)
 
 
 def _get_depths_helper(cset: FileSet,

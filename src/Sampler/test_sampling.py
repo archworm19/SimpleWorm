@@ -6,6 +6,7 @@ import numpy as np
 import numpy.random as npr
 from Sampler import set_sampling, file_reps, drawer
 
+# TODO: need tests for file sampling
 
 def _make_fake_tree():
     # 2 top-level sets
@@ -13,13 +14,15 @@ def _make_fake_tree():
     # each subset has 3 files
     # --> 4 subsets * 3 files each = 12 files
     # make the files
+    t_ar = np.ones((5,5))
+    id_ar = np.ones((5,2))
+    t0_samples = np.arange(5)
     sub_sets = []
     for i in range(4):
         ss = file_reps.FileSet([], [])
         for j in range(3):
             # relies on idn for identification
-            f = file_reps.SingleFile(i*3 + j, "tfile", "idfile",
-                                     [5,5,5], [5,4], "float32")
+            f = file_reps.save_file(i*3 + j, "TEMP", t_ar, id_ar, t0_samples)
             ss.files.append(f)
         sub_sets.append(ss)
     top_set0 = file_reps.FileSet(sub_sets[:2], None)
@@ -54,9 +57,9 @@ def test_sample_helper():
     # keep top level + split 2nd level:
     rng = npr.default_rng(42)
     newset0 = file_reps.FileSet([], None)
-    set_sampling._sample_helper(newset0, rng, root, [1., 0.5, 1.])
+    set_sampling._sample_helper(newset0, rng, root, [1., 0.5, 1.], 1.)
     filez = file_reps.get_files(newset0)
-    exp_idns = set([3,4,5,6,7,8])
+    exp_idns = set([6, 8, 7, 1, 0, 2])
     assert(len(filez) == 6)
     for fi in filez:
         assert(fi.idn in exp_idns)
@@ -64,9 +67,9 @@ def test_sample_helper():
     # split on top level
     # also an implicit test of deep copying
     newset0 = file_reps.FileSet([], None)
-    set_sampling._sample_helper(newset0, rng, root, [0.5, 1., .66667])
+    set_sampling._sample_helper(newset0, rng, root, [0.5, 1., .66667], 1.)
     filez = file_reps.get_files(newset0)
-    exp_idns = set([8,6,9,11])
+    exp_idns = set([1, 2, 3, 4])
     assert(len(filez) == 4)
     for fi in filez:
         assert(fi.idn in exp_idns)
@@ -75,9 +78,9 @@ def test_sample_helper():
 def test_anml_sampler():
     root = _make_fake_tree()
     rng = npr.default_rng(42)
-    new_root = set_sampling.get_anml_sample(root, .66667, rng)
+    new_root = set_sampling.get_anml_sample(root, .66667, 1., rng)
     filez = file_reps.get_files(new_root)
-    exp_idns = set([6, 8, 10, 11, 0, 1, 5, 3])
+    exp_idns = set([6, 8, 9, 10, 5, 4, 1, 2])
     for fi in filez:
         assert(fi.idn in exp_idns)
 
@@ -90,13 +93,17 @@ def _make_fake_files():
     id0 = np.vstack((np.arange(5), np.zeros(5,))).T
     id1 = np.vstack((np.arange(10), np.ones((10,)))).T
     id2 = np.vstack((np.arange(15), 2*np.ones((15,)))).T
+    t00 = np.arange(5)
+    t01 = np.arange(10)
+    t02 = np.arange(15)
     tz = [tar0, tar1, tar2]
     idz = [id0, id1, id2]
+    t0z = [t00, t01, t02]
     filez = []
     file_root = 'TEMP'
     for i in range(len(tz)):
         filez.append(file_reps.save_file(i, file_root + str(i), 
-                                         tz[i], idz[i]))
+                                         tz[i], idz[i], t0z[i]))
     # package into single set:
     return file_reps.FileSet([], filez)
 
