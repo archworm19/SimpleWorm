@@ -16,6 +16,14 @@ class TDrawer:
 
     def __init__(self, set_root: file_reps.FileSet,
                  twindow_size: int):
+        """Iniitialization
+
+        Args:
+            set_root (file_reps.FileSet): root file set object
+            twindow_size (int): timewindow size
+            t_sample_prob (float, optional): sampling probability
+                for tpts within a file. Defaults to 1..
+        """
         self.set_root = set_root
         self.twindow_size = twindow_size
         self.filez = file_reps.get_files(self.set_root)
@@ -28,6 +36,7 @@ class TDrawer:
 
     def _init_file_map(self, filez: List[file_reps.SingleFile]):
         """Initialize the internal file map
+        NOTE: should close memmap files at end of exe (gc)
 
         Returns: as a list
             np.ndarray: starting t0 of each file

@@ -28,7 +28,8 @@ def _sample_inds(rng: npr.Generator,
 def _sample_helper(new_set: file_reps.FileSet,
                    rng: npr.Generator,
                    cur_set: file_reps.FileSet,
-                   sample_probs: List[float]):
+                   sample_probs: List[float],
+                   t0_sample_prob: float):
     """Make deepcopy of subset of current set
     new_set is the deep copy we're building up"""
     # basecase: reached file level --> add selected files to new_tree
@@ -36,8 +37,9 @@ def _sample_helper(new_set: file_reps.FileSet,
         assert(cur_set.files is not None), "sampler : file rep mismatch"
         num_files = len(cur_set.files)
         sfinds = _sample_inds(rng, num_files, sample_probs[0])
-        sel_files = [file_reps.clone_single_file(cur_set.files[sfi])
-                      for sfi in sfinds]
+        sel_files = []
+        for sfi in sfinds:
+            sel_files.append(file_reps.sample_file(cur_set.files[sfi]))
         new_set.files = sel_files
         return None
     else:
@@ -52,6 +54,7 @@ def _sample_helper(new_set: file_reps.FileSet,
 
 def get_anml_sample(root_set: file_reps.FileSet,
                     anml_sample_prob: float,
+                    t0_sample_prob: float,
                     rng: npr.Generator):
     """Anml sampling strategy
     > Assumes static hierarchy
@@ -61,6 +64,8 @@ def get_anml_sample(root_set: file_reps.FileSet,
         root_set (file_reps.FileSet): _description_
         anml_sample_prob (float): sample probability
             for a given animal within each set
+        t0_sample_prob (float): selection probability
+            for each t0 within each file
     
     Returns:
         file_reps.FileSet: root of the deepcopy of the subset
@@ -71,5 +76,5 @@ def get_anml_sample(root_set: file_reps.FileSet,
         assert(de == depths[0]), "all depths must be the same"
     sample_probs = [1. for _ in range(de)] + [anml_sample_prob]
     new_set = file_reps.FileSet([], None)
-    _sample_helper(new_set, rng, root_set, sample_probs)
+    _sample_helper(new_set, rng, root_set, sample_probs, t0_sample_prob)
     return new_set

@@ -23,9 +23,12 @@ class SingleFile:
     idn: int
     t_file_name: str  # file name for time data
     id_file_name: str  # file name for id data
+    t0_sample_file_name: str  # file name for t0 samples
     t_file_shape: List[int]  # shape of numpy array in memmap file
     id_file_shape: List[int]  # ""
+    t0_file_shape: int  # number of t0s sampled for the current file
     dtypes: str
+    t0_sample_dtype: str
 
 
 @dataclasses.dataclass
@@ -73,16 +76,20 @@ def open_file(target_file: SingleFile):
         np.ndarray: id data
             memmap file
             T x M
+        np.ndarray: indices of sampled t0s within file
+            len num_samples array
     """
     t_dat = np.memmap(target_file.t_file_name, dtype=target_file.dtypes,
                       mode='r+', shape=target_file.t_file_shape)
     id_dat = np.memmap(target_file.id_file_name, dtype=target_file.dtypes,
                        mode='r+', shape=target_file.id_file_shape)
-    return t_dat, id_dat
+    t0_samples = np.memmap(target_file.t0_sample_file_name, dtype=target_file.t0_sample_dtype,
+                           mode='r+', shape=target_file.t0_file_shape)
+    return t_dat, id_dat, t0_samples
 
 
 def save_file(file_id: int, file_root: str,
-              t_ar: np.ndarray, id_ar: np.ndarray):
+              t_ar: np.ndarray, id_ar: np.ndarray, t0_samples: np.ndarray):
     """Create numpy memmap files from numpy arrays
     --> return SingleFile that points to these files
     NOTE: the created memmaps will be garbage collected
@@ -94,6 +101,7 @@ def save_file(file_id: int, file_root: str,
             into the filenames
         t_ar (np.ndarray): timeseries array
         id_ar (np.ndarray): identity array
+        t0_samples (np.ndarray): indices of sampled t0s
 
     Returns:
         SingleFile: 
@@ -101,19 +109,55 @@ def save_file(file_id: int, file_root: str,
     assert(t_ar.dtype == id_ar.dtype), "arrays must have same type"
     t_file_name = "{0}_{1}".format(file_root, "t_file.dat")
     id_file_name = "{0}_{1}".format(file_root, "id_file.dat")
+    t0_file_name = "{0}_{1}".format(file_root, "t0_samples.dat")
     # make the file --> copy data in
     t_dat = np.memmap(t_file_name, dtype=t_ar.dtype,
                       mode='w+', shape=np.shape(t_ar))
     id_dat = np.memmap(id_file_name, dtype=id_ar.dtype,
                        mode='w+', shape=np.shape(id_ar))
+    t0_dat = np.memmap(t0_file_name, dtype=t0_samples.dtype,
+                       mode='w+', shape=np.shape(t0_samples))
     t_dat[:] = t_ar[:]
     id_dat[:] = id_ar[:]
+    t0_dat[:] = t0_samples[:]
     return SingleFile(file_id,
                       t_file_name,
                       id_file_name,
+                      t0_file_name,
                       np.shape(t_ar),
                       np.shape(id_ar),
-                      t_ar.dtype)
+                      np.shape(t0_samples),
+                      t_ar.dtype,
+                      t0_samples.dtype)
+
+
+def sample_file(file: SingleFile,
+                t0_samples: np.ndarray):
+    """Sample t0s within a file
+    How? reassigns the t0 fields of a given file to point
+    to t0_samples ~ handles the creation of memmap file
+    NOTE: does NOT alter the original file
+
+    Args:
+        file (SingleFile): file to sample
+        t0_samples (np.ndarray): sample indices within file
+
+    Returns:
+        SingleFile: copy of file with t0 fields altered
+    """
+    t0_file_name = file.t0_sample_file_name + "_t0sample"
+    t0_dat = np.memmap(t0_file_name, dtype=t0_samples.dtype,
+                       mode='w+', shape=np.shape(t0_samples))
+    t0_dat[:] = t0_samples[:]
+    return SingleFile(file.idn,
+                      file.t_file_name,
+                      file.id_file_name,
+                      t0_file_name,
+                      file.t_file_shape,
+                      file.id_file_shape,
+                      np.shape(t0_samples),
+                      file.dtypes,
+                      t0_samples.dtype)
 
 
 def _get_depths_helper(cset: FileSet,
@@ -154,3 +198,5 @@ def get_files(cset: FileSet):
     for child in cset.sub_sets:
         ret_files.extend(get_files(child))
     return ret_files
+
+
