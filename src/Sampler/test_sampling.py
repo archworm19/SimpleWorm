@@ -6,7 +6,6 @@ import numpy as np
 import numpy.random as npr
 from Sampler import set_sampling, file_reps, drawer
 
-# TODO: need tests for file sampling
 
 def _make_fake_tree():
     # 2 top-level sets
@@ -85,7 +84,7 @@ def test_anml_sampler():
         assert(fi.idn in exp_idns)
 
 
-def _make_fake_files():
+def _make_fake_files(t0_sub: bool = False):
     # make a single set with 3 animals
     tar0 = np.zeros((5, 8, 3))
     tar1 = np.ones((10, 8, 3))
@@ -93,9 +92,14 @@ def _make_fake_files():
     id0 = np.vstack((np.arange(5), np.zeros(5,))).T
     id1 = np.vstack((np.arange(10), np.ones((10,)))).T
     id2 = np.vstack((np.arange(15), 2*np.ones((15,)))).T
-    t00 = np.arange(5)
-    t01 = np.arange(10)
-    t02 = np.arange(15)
+    if t0_sub:
+        t00 = np.arange(3)
+        t01 = np.arange(3)
+        t02 = np.arange(3)
+    else:
+        t00 = np.arange(5)
+        t01 = np.arange(10)
+        t02 = np.arange(15)
     tz = [tar0, tar1, tar2]
     idz = [id0, id1, id2]
     t0z = [t00, t01, t02]
@@ -137,9 +141,30 @@ def test_drawer():
     assert(idsamp[0,1] == 2)
 
 
+def test_drawer_t0():
+    root = _make_fake_files(t0_sub=True)
+    twindow_size = 3
+    D = drawer.TDrawer(root, twindow_size)
+    avail_samples = D.get_available_samples()
+    assert(avail_samples == 9)
+    tsamp, idsamp = D.draw_samples(np.arange(9))
+    exp_idsamp = np.array([[0., 0.],
+                            [1., 0.],
+                            [2., 0.],
+                            [0., 1.],
+                            [1., 1.],
+                            [2., 1.],
+                            [0., 2.],
+                            [1., 2.],
+                            [2., 2.]])
+    assert(np.sum(exp_idsamp - idsamp) < .001)
+    assert(np.shape(tsamp) == (9, 3, 8, 3))
+
+
 if __name__ == '__main__':
     test_depth()
     test_idx_mapping()
     test_sample_helper()
     test_anml_sampler()
     test_drawer()
+    test_drawer_t0()

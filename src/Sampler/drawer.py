@@ -35,6 +35,23 @@ class TDrawer:
         self.iddat = [None] * N
         self.t0dat = [None] * N
 
+    def _get_useable_t0s(self, t0s: np.ndarray, ar_len: int):
+        """Not every t0 in a file rep is useable
+        Some specify windows that overhang the end of the dataset
+        This file returns a boolean array specifying which can 
+        be used given the twindow_size
+
+        Args:
+            t0s (np.ndarray): t0 samples for given file
+            ar_len (int): array len
+                Ex: len(t_dat[i])
+
+        Returns:
+            np.ndarray: boolean array of len = len(t0s)
+        """
+
+        return t0s <= ar_len - self.twindow_size
+
     def _init_file_map(self, filez: List[file_reps.SingleFile]):
         """Initialize the internal file map
         NOTE: should close memmap files at end of exe (gc)
@@ -50,10 +67,15 @@ class TDrawer:
         ct0 = 0
         for cfile in filez:
             t0s.append(ct0)
-            _t_dat, _id_dat, t0_samples = file_reps.open_file(cfile)
+            t_dat, _id_dat, t0_samples = file_reps.open_file(cfile)
             file_idns.append(cfile.idn)
+
+            # useable t0_samples = where twindow won't overrun sample
+            use_t0s = self._get_useable_t0s(t0_samples, len(t_dat))
+
             # increment ct0 to next file
-            ct0 += 1 + len(t0_samples) - self.twindow_size
+            ct0 += int(np.sum(use_t0s))
+
         return np.array(t0s), file_idns, ct0
 
     def get_available_samples(self):
@@ -68,6 +90,9 @@ class TDrawer:
     def draw_sample(self, idx: int):
         """Draw a single sample
         NOTE: handles singleton loading
+        NOTE: by operating on self.t0s, this
+            function implicitly operates only on
+            useable t0 samples
 
         Args:
             idx (int): index across files
