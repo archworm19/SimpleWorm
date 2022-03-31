@@ -40,9 +40,10 @@ class FileSet:
 
 def clone_single_file(old_file: SingleFile):
     # cheap operation cuz just filenames and metadata:
-    return SingleFile(old_file.idn, old_file.t_file_name,
-                      old_file.id_file_name, old_file.t_file_shape,
-                      old_file.id_file_shape, old_file.dtypes)
+    return SingleFile(old_file.idn,
+                      old_file.t_file_name, old_file.id_file_name, old_file.t0_sample_file_name,
+                      old_file.t_file_shape, old_file.id_file_shape, old_file.t0_file_shape,
+                      old_file.dtypes)
 
 
 def map_idx_to_file(root_set: FileSet, set_idx: List[int], file_idx: int):
@@ -219,5 +220,3 @@ def get_files(cset: FileSet):
     for child in cset.sub_sets:
         ret_files.extend(get_files(child))
     return ret_files
-
-

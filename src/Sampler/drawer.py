@@ -93,6 +93,7 @@ class TDrawer:
         NOTE: by operating on self.t0s, this
             function implicitly operates only on
             useable t0 samples
+        TODO: there's probably a more efficient version of this sampling
 
         Args:
             idx (int): index across files
