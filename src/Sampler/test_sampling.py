@@ -2,6 +2,7 @@
     > file_reps
     > set_sampling
     > TODO: sampling"""
+import copy
 import numpy as np
 import numpy.random as npr
 from Sampler import set_sampling, file_reps, drawer
@@ -51,25 +52,54 @@ def test_idx_mapping():
                 count += 1
 
 
-def test_sample_helper():
+# just return the file
+class IDFP(set_sampling.FilePlan):
+    def __init__(self):
+        pass
+    def sample_file(self, target_file: file_reps.SingleFile):
+        return copy.deepcopy(target_file)
+
+
+def test_sample_exe():
+    # fake tree --> 2 top-level > 2 each > 3 files
     root = _make_fake_tree()
+
     # keep top level + split 2nd level:
-    rng = npr.default_rng(42)
+    pl_root = set_sampling.Plan(0, [], {})
+    for i in range(2):
+        vi = set_sampling.Plan(i, [], {})
+        pl_root.sub_plan.append(vi)
+        for j in [0]:
+            vj = set_sampling.Plan(j, [], {})
+            vi.sub_plan.append(vj)
+            for k in range(3):
+                vj.sub_files[k] = IDFP()
+
     newset0 = file_reps.FileSet([], None)
-    set_sampling._sample_helper(newset0, rng, root, [1., 0.5, 1.], 1.)
+    set_sampling.exe_plan(newset0, root, pl_root)
     filez = file_reps.get_files(newset0)
-    exp_idns = set([6, 8, 7, 1, 0, 2])
+    exp_idns = set([0,1,2,6,7,8])
     assert(len(filez) == 6)
     for fi in filez:
         assert(fi.idn in exp_idns)
     
     # split on top level
     # also an implicit test of deep copying
+    pl_root = set_sampling.Plan(0, [], {})
+    for i in [1]:
+        vi = set_sampling.Plan(i, [], {})
+        pl_root.sub_plan.append(vi)
+        for j in [0, 1]:
+            vj = set_sampling.Plan(j, [], {})
+            vi.sub_plan.append(vj)
+            for k in range(3):
+                vj.sub_files[k] = IDFP()
+
     newset0 = file_reps.FileSet([], None)
-    set_sampling._sample_helper(newset0, rng, root, [0.5, 1., .66667], 1.)
+    set_sampling.exe_plan(newset0, root, pl_root)
     filez = file_reps.get_files(newset0)
-    exp_idns = set([1, 2, 3, 4])
-    assert(len(filez) == 4)
+    exp_idns = set([6,7,8,9,10,11])
+    assert(len(filez) == 6)
     for fi in filez:
         assert(fi.idn in exp_idns)
 
@@ -164,7 +194,7 @@ def test_drawer_t0():
 if __name__ == '__main__':
     test_depth()
     test_idx_mapping()
-    test_sample_helper()
-    test_anml_sampler()
-    test_drawer()
-    test_drawer_t0()
+    test_sample_exe()
+    #test_anml_sampler()
+    #test_drawer()
+    #test_drawer_t0()

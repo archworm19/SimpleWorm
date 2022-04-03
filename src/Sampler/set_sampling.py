@@ -59,9 +59,9 @@ class Plan:
         self.sub_files = sub_files
 
 
-def _exe_plan(new_set: file_reps.FileSet,
-              cur_set: file_reps.FileSet,
-              cur_plan: Plan):
+def exe_plan(new_set: file_reps.FileSet,
+             cur_set: file_reps.FileSet,
+             cur_plan: Plan):
     """Execute current level of the plan
 
     Args:
@@ -74,7 +74,8 @@ def _exe_plan(new_set: file_reps.FileSet,
         sel_files = []
         for ind in cur_plan.sub_files:
             fplan = cur_plan.sub_files[ind]
-            sel_files.append(fplan.sample_file(cur_set.files[ind]))
+            target_file = cur_set.files[ind]
+            sel_files.append(fplan.sample_file(target_file))
         new_set.files = sel_files
     else:
         # NOTE: ss = child Plan
@@ -82,7 +83,7 @@ def _exe_plan(new_set: file_reps.FileSet,
             set_idx = ss.set_idx
             new_sub_set = file_reps.FileSet([], None)
             new_set.sub_sets.append(new_sub_set)
-            _exe_plan(new_sub_set, cur_set.sub_sets[set_idx], ss)
+            exe_plan(new_sub_set, cur_set.sub_sets[set_idx], ss)
 
 
 class DefaultFilePlan(FilePlan):
@@ -161,6 +162,6 @@ def get_anml_sample(root_set: file_reps.FileSet,
     p1, p2 = default_plan_creation(root_set, sample_probs, t0_sample_prob, rng)
     # execute:
     new_set = file_reps.FileSet([], None)
-    sample_set1 = _exe_plan(new_set, root_set, p1)
-    sample_set2 = _exe_plan(new_set, root_set, p2)
+    sample_set1 = exe_plan(new_set, root_set, p1)
+    sample_set2 = exe_plan(new_set, root_set, p2)
     return sample_set1, sample_set2
