@@ -9,9 +9,16 @@
     > Sampling returns a subset of the tree
     > Rely on file names for record
 
+    Plan vs. Execution Design:
+    > Execution: takes in a sampling plan --> applies it to base FileSet
+    > > Static across strategies
+    > Plan: tree structure much like FileSet
+    > > Alter the plan to customize sampling strategy
+
 """
 import abc
 from typing import List, Dict
+import numpy as np
 import numpy.random as npr
 from Sampler import file_reps
 
@@ -26,20 +33,6 @@ def _sample_inds(rng: npr.Generator,
     N = int(sample_prob * num_elems)
     return inds[:N], inds[N:]
 
-
-# TODO: best way to do complements?
-# Idea 1
-# > methods
-# > > sample files
-# > > > get complements
-# > > sample within files
-# Idea 2
-# > Methods
-# > > plan
-# > > > generate a plan that can be modified or executed
-# > > > ... have a number of helper methods for plan generation
-# > > execute
-# > > > what we have right now
 
 class FilePlan(abc.ABC):
 
@@ -102,15 +95,47 @@ class DefaultFilePlan(FilePlan):
         return file_reps.sample_file_subset(target_file, self.sample_prob, self.rng)
 
 
-# TODO: level sampler
-# ... should be generally useful for plan creation
+class SwitchingFilePlan(FilePlan):
+    # twindow: analysis timewindow
+    # blocksize: number of adjacent windows that will be grouped together
+    # start_hi: whether 0th block is selected or not
+    # Logic?
+    # > break trial into blocks
+    # > blocks alternate between On/Off
+    
+    def __init__(self, twindow_size: int, block_size: int,
+                 start_hi: bool,
+                 offset: int):
+        self.twindow_size = twindow_size
+        self.block_size = block_size
+        self.start_hi = start_hi
+        self.offset = offset
+    
+    def _get_t0s(self, target_file: file_reps.SingleFile):
+        tz, _, init_t0s = file_reps.open_file(target_file)
+        return len(tz), init_t0s
+    
+    def sample_file(self, target_file: file_reps.SingleFile):
+        L, init_t0s = self._get_t0s(target_file)
+        markz = np.zeros((L,))
+        hbit = 1 * self.start_hi
+        for i in range(self.offset, L, self.block_size):
+            markz[i:i+1+self.block_size-self.twindow_size] = hbit
+            hbit = 1 - hbit
+        # filter with init_t0s:
+        fmask = np.zeros((L,))
+        fmask[init_t0s] = 1
+        markz = markz * fmask
+        sel_t0s = np.where(markz)[0]
+        return file_reps.sample_file(target_file, sel_t0s)
 
 
 def _split_files(parent_set: file_reps.FileSet,
                  parent_plan1: Plan,
                  parent_plan2: Plan,
                  file_sample_prob: float,
-                 t0_sample_prob: float,
+                 file_plan1: FilePlan,
+                 file_plan2: FilePlan,
                  rng: npr.Generator):
     # split files into primary and complementary files
     # --> save for the 2 plans
@@ -118,9 +143,9 @@ def _split_files(parent_set: file_reps.FileSet,
     # select files:
     sel_inds, comp_inds = _sample_inds(rng, len(parent_set.files), file_sample_prob)
     for si in sel_inds:
-        parent_plan1.sub_files[si] = DefaultFilePlan(t0_sample_prob, rng)
+        parent_plan1.sub_files[si] = file_plan1
     for ci in comp_inds:
-        parent_plan2.sub_files[ci] = DefaultFilePlan(t0_sample_prob, rng)
+        parent_plan2.sub_files[ci] = file_plan2
 
 
 def _split_sets(parent_set: file_reps.FileSet,
@@ -140,19 +165,19 @@ def _split_sets(parent_set: file_reps.FileSet,
 
 def _plancopy(parent_set: file_reps.FileSet,
               parent_plan: Plan,
-              t0_sample_prob: float,
+              file_plan: FilePlan,
               rng: npr.Generator):
     # Takes over after splitting --> select everybody
 
     # basecase: no more subsets --> must be files
     if len(parent_set.sub_sets) == 0:
         for i in range(len(parent_set.files)):
-            parent_plan.sub_files[i] = DefaultFilePlan(t0_sample_prob, rng)
+            parent_plan.sub_files[i] = file_plan
     else:
         for i, ss in enumerate(parent_set.sub_sets):
             new_plan = Plan(i, [], {})
             parent_plan.sub_plan.append(new_plan)
-            _plancopy(ss, new_plan, t0_sample_prob, rng)
+            _plancopy(ss, new_plan, file_plan, rng)
 
 
 def _level_sample_planner(current_level: int,
@@ -161,7 +186,8 @@ def _level_sample_planner(current_level: int,
                           parent_plan2: Plan,
                           split_level: int,
                           level_prob: float,
-                          t0_sample_prob: float,
+                          file_plan1: FilePlan,
+                          file_plan2: FilePlan,
                           rng: npr.Generator):
     # split_level = which level to split at
     # level_prob = split probability for plan1
@@ -170,15 +196,17 @@ def _level_sample_planner(current_level: int,
     # basecase: are we at splitting level:
     if current_level == split_level:
         if len(parent_set.sub_sets) == 0:
-            _split_files(parent_set, parent_plan1, parent_plan2, level_prob, t0_sample_prob, rng)
+            _split_files(parent_set, parent_plan1, parent_plan2, level_prob,
+                         file_plan1, file_plan2, rng)
         else:
             sel_inds, comp_inds = _split_sets(parent_set, parent_plan1, parent_plan2, level_prob, rng)
             indz = [sel_inds, comp_inds]
             pplanz = [parent_plan1, parent_plan2]
+            fplanz = [file_plan1, file_plan2]
             for i in range(2):
                 for j, child in enumerate(pplanz[i].sub_plan):
                     sij = indz[i][j]
-                    _plancopy(parent_set.sub_sets[sij], child, t0_sample_prob, rng)
+                    _plancopy(parent_set.sub_sets[sij], child, fplanz[i], rng)
     
     # descend next level
     else:
@@ -191,13 +219,15 @@ def _level_sample_planner(current_level: int,
             parent_plan2.sub_plan.append(p2)
             _level_sample_planner(current_level + 1, child,
                                   p1, p2, split_level,
-                                  level_prob, t0_sample_prob, rng)
+                                  level_prob,
+                                  file_plan1, file_plan2, rng)
 
 
 def level_sample_planner(set_root: file_reps.FileSet,
                          split_level: int,
                          split_prob: float,
-                         t0_sample_prob: float,
+                         file_plan1: FilePlan,
+                         file_plan2: FilePlan,
                          rng: npr.Generator):
     """level sample planner
     Split root set into 2 complementary sets
@@ -210,8 +240,8 @@ def level_sample_planner(set_root: file_reps.FileSet,
             we want to split
         split_prob (float): probability of given subset/subfile
             being allocated to primary set during split
-        t0_sample_prob (fl0at): probability of timepoint
-            being assigned to a set for selected files
+        file_plan[1,2]: file plans for the primary and complemntary
+            sets
         rng (npr.Generator):
 
     Returns:
@@ -221,13 +251,15 @@ def level_sample_planner(set_root: file_reps.FileSet,
     p1_root = Plan(0, [], {})
     p2_root = Plan(0, [], {})
     _level_sample_planner(0, set_root, p1_root, p2_root, split_level, split_prob,
-                          t0_sample_prob, rng)
+                          file_plan1, file_plan2, rng)
     return p1_root, p2_root
 
 
 def get_anml_sample(root_set: file_reps.FileSet,
                     anml_sample_prob: float,
-                    t0_sample_prob: float,
+                    block_size: int,
+                    twindow_size: int,
+                    offset: int,
                     rng: npr.Generator):
     """Anml sampling strategy
     > Assumes static hierarchy
@@ -237,8 +269,10 @@ def get_anml_sample(root_set: file_reps.FileSet,
         root_set (file_reps.FileSet): _description_
         anml_sample_prob (float): sample probability
             for a given animal within each set
-        t0_sample_prob (float): selection probability
-            for each t0 within each file
+        block_size (int): number of adjacent timewindows
+            that will fall in the same set
+        twindow_size (int): analysis timewindow size
+        offset (int): where to start t0 sampling
     
     Returns:
         file_reps.FileSet: root of the deepcopy of the first 
@@ -249,11 +283,16 @@ def get_anml_sample(root_set: file_reps.FileSet,
     depths = file_reps.get_depths(root_set)
     for de in depths[1:]:
         assert(de == depths[0]), "all depths must be the same"
-    sample_probs = [1. for _ in range(de)] + [anml_sample_prob]
-    # get plans:
-    p1, p2 = default_plan_creation(root_set, sample_probs, t0_sample_prob, rng)
-    # execute:
-    new_set = file_reps.FileSet([], None)
-    sample_set1 = exe_plan(new_set, root_set, p1)
-    sample_set2 = exe_plan(new_set, root_set, p2)
-    return sample_set1, sample_set2
+
+    file_plan1 = SwitchingFilePlan(twindow_size, block_size, True, offset)
+    file_plan2 = SwitchingFilePlan(twindow_size, block_size, False, offset)
+
+    pla1, pla2 = level_sample_planner(root_set, depths[0],
+                                      anml_sample_prob,
+                                      file_plan1, file_plan2,
+                                      rng)
+    new_set1 = file_reps.FileSet([], None)
+    new_set2 = file_reps.FileSet([], None)
+    exe_plan(new_set1, root_set, pla1)
+    exe_plan(new_set2, root_set, pla2)
+    return new_set1, new_set2

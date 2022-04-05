@@ -112,8 +112,11 @@ def test_level_splitter_creation():
 
     rng = npr.default_rng(666)
 
+    file_plan = set_sampling.DefaultFilePlan(0.5, rng)
+
     # split at top level:
-    p1, p2 = set_sampling.level_sample_planner(root, 0, 0.5, 1., rng)
+    p1, p2 = set_sampling.level_sample_planner(root, 0, 0.5, file_plan, file_plan,
+                                               rng)
 
     # execute plans --> get file idns:
     newset1 = file_reps.FileSet([], None)
@@ -126,7 +129,7 @@ def test_level_splitter_creation():
     assert(np.sum(files2 != np.arange(6,12)) < 1)
 
     # split at file level:
-    p1, p2 = set_sampling.level_sample_planner(root, 2, 0.667, 1., rng)
+    p1, p2 = set_sampling.level_sample_planner(root, 2, 0.667, file_plan, file_plan, rng)
 
     # execute plans --> get file idns:
     newset1 = file_reps.FileSet([], None)
@@ -141,10 +144,10 @@ def test_level_splitter_creation():
 
 def _make_fake_files(t0_sub: bool = False):
     # make a single set with 3 animals
-    tar0 = np.zeros((5, 8, 3))
+    tar0 = np.zeros((20, 8, 3))
     tar1 = np.ones((10, 8, 3))
     tar2 = np.ones((15, 8, 3)) * 2
-    id0 = np.vstack((np.arange(5), np.zeros(5,))).T
+    id0 = np.vstack((np.arange(20), np.zeros(20,))).T
     id1 = np.vstack((np.arange(10), np.ones((10,)))).T
     id2 = np.vstack((np.arange(15), 2*np.ones((15,)))).T
     if t0_sub:
@@ -152,7 +155,7 @@ def _make_fake_files(t0_sub: bool = False):
         t01 = np.arange(3)
         t02 = np.arange(3)
     else:
-        t00 = np.arange(5)
+        t00 = np.arange(20)
         t01 = np.arange(10)
         t02 = np.arange(15)
     tz = [tar0, tar1, tar2]
@@ -166,6 +169,20 @@ def _make_fake_files(t0_sub: bool = False):
     # package into single set:
     return file_reps.FileSet([], filez)
 
+
+def test_animal_sampler():
+    root = _make_fake_files()
+    rng = npr.default_rng(42)
+    set1, set2 = set_sampling.get_anml_sample(root, .667, 4, 2, 1, rng)
+    f1 = file_reps.get_files(set1)
+    f2 = file_reps.get_files(set2)
+    target_t0s = [np.array([1, 2, 3, 9, 10, 11]),
+                  np.array([1, 2, 3, 9]), 
+                  np.array([5, 6, 7, 13, 14, 15])]
+    for f, targ_f in zip(f1 + f2, target_t0s):
+        _, _, t0s = file_reps.open_file(f)
+        assert(np.sum(t0s != targ_f) < 1)
+    
 
 def test_drawer():
     root = _make_fake_files()
@@ -221,5 +238,6 @@ if __name__ == '__main__':
     test_idx_mapping()
     test_sample_exe()
     test_level_splitter_creation()
+    test_animal_sampler()
     #test_drawer()
     #test_drawer_t0()
