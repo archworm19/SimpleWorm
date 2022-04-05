@@ -86,6 +86,9 @@ def exe_plan(new_set: file_reps.FileSet,
             exe_plan(new_sub_set, cur_set.sub_sets[set_idx], ss)
 
 
+# NOTE: stuff below here is likely to be specific, have limited generality
+
+
 class DefaultFilePlan(FilePlan):
     # default: randomly sample a percentage of the t0s
 
@@ -99,37 +102,126 @@ class DefaultFilePlan(FilePlan):
         return file_reps.sample_file_subset(target_file, self.sample_prob, self.rng)
 
 
-def _default_plan_creation(parent_set: file_reps.FileSet,
-                           parent_plan1: Plan, parent_plan2: Plan,
-                           sample_prob: List[float],
-                           file_sample_prob: float, rng: npr.Generator):
-    if len(sample_prob) == 1:  # assumed to be for selecting fiels
-        assert(len(parent_set.files) > 0), "no files found"
-        # select files:
-        sel_inds, comp_inds = _sample_inds(rng, len(parent_set.files), sample_prob[0])
-        for si in sel_inds:
-            parent_plan1.sub_files[si] = DefaultFilePlan(file_sample_prob, rng)
-        for ci in comp_inds:
-            parent_plan2.sub_files[ci] = DefaultFilePlan(file_sample_prob, rng)
-    else:  # not at file level yet
-        # don't split sets
-        for i, subset in enumerate(parent_set.sub_sets):
-            v1 = Plan(i, [], {})
-            v2 = Plan(i, [], {})
-            parent_plan1.sub_plan.append(v1)
-            parent_plan2.sub_plan.append(v2)
-            _default_plan_creation(subset, v1, v2, sample_prob[1:], file_sample_prob, rng)
+# TODO: level sampler
+# ... should be generally useful for plan creation
 
 
-# TODO: default plan creation
-# = split parent set into 2 complementary sets + retain 
-def default_plan_creation(set_root: file_reps.FileSet,
-                          sample_probs: List[float], 
-                          file_sample_prob: float,
+def _split_files(parent_set: file_reps.FileSet,
+                 parent_plan1: Plan,
+                 parent_plan2: Plan,
+                 file_sample_prob: float,
+                 t0_sample_prob: float,
+                 rng: npr.Generator):
+    # split files into primary and complementary files
+    # --> save for the 2 plans
+    # ASSUMES: at bottom level --> don't have to worry about further calls
+    # select files:
+    sel_inds, comp_inds = _sample_inds(rng, len(parent_set.files), file_sample_prob)
+    for si in sel_inds:
+        parent_plan1.sub_files[si] = DefaultFilePlan(t0_sample_prob, rng)
+    for ci in comp_inds:
+        parent_plan2.sub_files[ci] = DefaultFilePlan(t0_sample_prob, rng)
+
+
+def _split_sets(parent_set: file_reps.FileSet,
+                parent_plan1: Plan,
+                parent_plan2: Plan,
+                set_sample_prob: float,
+                rng: npr.Generator):
+    # split a set into 2 complementary sets
+    # Returns: indices; inserted the new plans into parent plans
+    sel_inds, comp_inds = _sample_inds(rng, len(parent_set.sub_sets), set_sample_prob)
+    for si in sel_inds:
+        parent_plan1.sub_plan.append(Plan(si, [], {}))
+    for ci in comp_inds:
+        parent_plan2.sub_plan.append(Plan(ci, [], {}))
+    return sel_inds, comp_inds
+
+
+def _plancopy(parent_set: file_reps.FileSet,
+              parent_plan: Plan,
+              t0_sample_prob: float,
+              rng: npr.Generator):
+    # Takes over after splitting --> select everybody
+
+    # basecase: no more subsets --> must be files
+    if len(parent_set.sub_sets) == 0:
+        for i in range(len(parent_set.files)):
+            parent_plan.sub_files[i] = DefaultFilePlan(t0_sample_prob, rng)
+    else:
+        for i, ss in enumerate(parent_set.sub_sets):
+            new_plan = Plan(i, [], {})
+            parent_plan.sub_plan.append(new_plan)
+            _plancopy(ss, new_plan, t0_sample_prob, rng)
+
+
+def _level_sample_planner(current_level: int,
+                          parent_set: file_reps.FileSet,
+                          parent_plan1: Plan,
+                          parent_plan2: Plan,
+                          split_level: int,
+                          level_prob: float,
+                          t0_sample_prob: float,
                           rng: npr.Generator):
+    # split_level = which level to split at
+    # level_prob = split probability for plan1
+    # --> (1 - level_prob) for plan2
+
+    # basecase: are we at splitting level:
+    if current_level == split_level:
+        if len(parent_set.sub_sets) == 0:
+            _split_files(parent_set, parent_plan1, parent_plan2, level_prob, t0_sample_prob, rng)
+        else:
+            sel_inds, comp_inds = _split_sets(parent_set, parent_plan1, parent_plan2, level_prob, rng)
+            indz = [sel_inds, comp_inds]
+            pplanz = [parent_plan1, parent_plan2]
+            for i in range(2):
+                for j, child in enumerate(pplanz[i].sub_plan):
+                    sij = indz[i][j]
+                    _plancopy(parent_set.sub_sets[sij], child, t0_sample_prob, rng)
+    
+    # descend next level
+    else:
+        # ensure we're not at base
+        assert(len(parent_set.sub_sets) > 0), "illegal level specified"
+        for i, child in enumerate(parent_set.sub_sets):
+            p1 = Plan(i, [], {})
+            p2 = Plan(i, [], {})
+            parent_plan1.sub_plan.append(p1)
+            parent_plan2.sub_plan.append(p2)
+            _level_sample_planner(current_level + 1, child,
+                                  p1, p2, split_level,
+                                  level_prob, t0_sample_prob, rng)
+
+
+def level_sample_planner(set_root: file_reps.FileSet,
+                         split_level: int,
+                         split_prob: float,
+                         t0_sample_prob: float,
+                         rng: npr.Generator):
+    """level sample planner
+    Split root set into 2 complementary sets
+    > Splits at level specified by split_level
+    > Resulting sets will be identical before split
+
+    Args:
+        set_root (file_reps.FileSet): root set
+        split_level (int): level of hierarchy at which
+            we want to split
+        split_prob (float): probability of given subset/subfile
+            being allocated to primary set during split
+        t0_sample_prob (fl0at): probability of timepoint
+            being assigned to a set for selected files
+        rng (npr.Generator):
+
+    Returns:
+        file_reps.FileSet: set
+        file_reps.FileSet: complementary set
+    """
     p1_root = Plan(0, [], {})
     p2_root = Plan(0, [], {})
-    _default_plan_creation(set_root, p1_root, p2_root, sample_probs, file_sample_prob, rng)
+    _level_sample_planner(0, set_root, p1_root, p2_root, split_level, split_prob,
+                          t0_sample_prob, rng)
     return p1_root, p2_root
 
 

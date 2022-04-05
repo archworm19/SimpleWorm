@@ -104,14 +104,39 @@ def test_sample_exe():
         assert(fi.idn in exp_idns)
 
 
-def test_anml_sampler():
+def test_level_splitter_creation():
+    # fake tree --> 2 top-level > 2 each > 3 files
     root = _make_fake_tree()
-    rng = npr.default_rng(42)
-    new_root = set_sampling.get_anml_sample(root, .66667, 1., rng)
-    filez = file_reps.get_files(new_root)
-    exp_idns = set([6, 8, 9, 10, 5, 4, 1, 2])
-    for fi in filez:
-        assert(fi.idn in exp_idns)
+
+    assert(len(file_reps.get_files(root)) == 12)
+
+    rng = npr.default_rng(666)
+
+    # split at top level:
+    p1, p2 = set_sampling.level_sample_planner(root, 0, 0.5, 1., rng)
+
+    # execute plans --> get file idns:
+    newset1 = file_reps.FileSet([], None)
+    newset2 = file_reps.FileSet([], None)
+    set_sampling.exe_plan(newset1, root, p1)
+    set_sampling.exe_plan(newset2, root, p2)
+    files1 = np.sort([f.idn for f in file_reps.get_files(newset1)])
+    files2 = np.sort([f.idn for f in file_reps.get_files(newset2)])
+    assert(np.sum(files1 != np.arange(6)) < 1)
+    assert(np.sum(files2 != np.arange(6,12)) < 1)
+
+    # split at file level:
+    p1, p2 = set_sampling.level_sample_planner(root, 2, 0.667, 1., rng)
+
+    # execute plans --> get file idns:
+    newset1 = file_reps.FileSet([], None)
+    newset2 = file_reps.FileSet([], None)
+    set_sampling.exe_plan(newset1, root, p1)
+    set_sampling.exe_plan(newset2, root, p2)
+    files1 = np.sort([f.idn for f in file_reps.get_files(newset1)])
+    files2 = np.sort([f.idn for f in file_reps.get_files(newset2)])
+    assert(np.sum(files1 - np.array([0, 2, 3, 4, 6, 8, 9, 10])) < .00001)
+    assert(np.sum(files2 - np.array([1, 5, 7, 11])) < .00001)
 
 
 def _make_fake_files(t0_sub: bool = False):
@@ -195,6 +220,6 @@ if __name__ == '__main__':
     test_depth()
     test_idx_mapping()
     test_sample_exe()
-    #test_anml_sampler()
+    test_level_splitter_creation()
     #test_drawer()
     #test_drawer_t0()
