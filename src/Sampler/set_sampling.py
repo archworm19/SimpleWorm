@@ -81,9 +81,17 @@ def exe_plan(new_set: file_reps.FileSet,
 
 # NOTE: stuff below here is likely to be specific, have limited generality
 
+class AllSampleFilePlan(FilePlan):
+    # just take all available t0s
 
-class DefaultFilePlan(FilePlan):
-    # default: randomly sample a percentage of the t0s
+    def __init__(self):
+        pass
+
+    def sample_file(self, target_file: file_reps.SingleFile):
+        return file_reps.clone_single_file(target_file)
+
+class RandFilePlan(FilePlan):
+    # randomly sample a percentage of the t0s
 
     def __init__(self, sample_prob: float,
                  rng: npr.Generator):
@@ -255,13 +263,33 @@ def level_sample_planner(set_root: file_reps.FileSet,
     return p1_root, p2_root
 
 
-def get_anml_sample(root_set: file_reps.FileSet,
-                    anml_sample_prob: float,
-                    block_size: int,
-                    twindow_size: int,
-                    offset: int,
-                    rng: npr.Generator):
-    """Anml sampling strategy
+def _get_anml_sample(root_set: file_reps.FileSet,
+                     file_plan1: FilePlan,
+                     file_plan2: FilePlan,
+                     anml_sample_prob: float,
+                     rng: npr.Generator):
+    depths = file_reps.get_depths(root_set)
+    for de in depths[1:]:
+        assert(de == depths[0]), "all depths must be the same"
+
+    pla1, pla2 = level_sample_planner(root_set, depths[0],
+                                      anml_sample_prob,
+                                      file_plan1, file_plan2,
+                                      rng)
+    new_set1 = file_reps.FileSet([], None)
+    new_set2 = file_reps.FileSet([], None)
+    exe_plan(new_set1, root_set, pla1)
+    exe_plan(new_set2, root_set, pla2)
+    return new_set1, new_set2
+
+
+def get_anml_sample_switch(root_set: file_reps.FileSet,
+                           anml_sample_prob: float,
+                           block_size: int,
+                           twindow_size: int,
+                           offset: int,
+                           rng: npr.Generator):
+    """Anml sampling strategy + with switching file strategy
     > Assumes static hierarchy
     > Keeps all sets ~ samples animals within sets
 
@@ -280,19 +308,15 @@ def get_anml_sample(root_set: file_reps.FileSet,
         file_reps.FileSet: root of the deepcopy of the complement
             subset
     """
-    depths = file_reps.get_depths(root_set)
-    for de in depths[1:]:
-        assert(de == depths[0]), "all depths must be the same"
-
     file_plan1 = SwitchingFilePlan(twindow_size, block_size, True, offset)
     file_plan2 = SwitchingFilePlan(twindow_size, block_size, False, offset)
+    return _get_anml_sample(root_set, file_plan1, file_plan2,
+                            anml_sample_prob, rng)
 
-    pla1, pla2 = level_sample_planner(root_set, depths[0],
-                                      anml_sample_prob,
-                                      file_plan1, file_plan2,
-                                      rng)
-    new_set1 = file_reps.FileSet([], None)
-    new_set2 = file_reps.FileSet([], None)
-    exe_plan(new_set1, root_set, pla1)
-    exe_plan(new_set2, root_set, pla2)
-    return new_set1, new_set2
+
+def get_anml_sample_allt0(root_set: file_reps.FileSet,
+                          anml_sample_prob: float,
+                          rng: npr.Generator):
+    file_plan = AllSampleFilePlan()
+    return _get_anml_sample(root_set, file_plan, file_plan,
+                            anml_sample_prob, rng)

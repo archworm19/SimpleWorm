@@ -112,7 +112,7 @@ def test_level_splitter_creation():
 
     rng = npr.default_rng(666)
 
-    file_plan = set_sampling.DefaultFilePlan(0.5, rng)
+    file_plan = set_sampling.RandFilePlan(0.5, rng)
 
     # split at top level:
     p1, p2 = set_sampling.level_sample_planner(root, 0, 0.5, file_plan, file_plan,
@@ -173,7 +173,7 @@ def _make_fake_files(t0_sub: bool = False):
 def test_animal_sampler():
     root = _make_fake_files()
     rng = npr.default_rng(42)
-    set1, set2 = set_sampling.get_anml_sample(root, .667, 4, 2, 1, rng)
+    set1, set2 = set_sampling.get_anml_sample_switch(root, .667, 4, 2, 1, rng)
     f1 = file_reps.get_files(set1)
     f2 = file_reps.get_files(set2)
     target_t0s = [np.array([1, 2, 3, 9, 10, 11]),
@@ -238,6 +238,37 @@ def test_drawer_t0():
     assert(np.shape(tsamp) == (9, 3, 8, 3))
 
 
+def _get_file_ids(set_root: file_reps.FileSet):
+    fz = file_reps.get_files(set_root)
+    return [fi.idn for fi in fz]
+
+
+def test_double_sample():
+    # simulates real experiments
+    # > divide into train/cv vs. test
+    # > divides train/cv --> train vs. cv
+    root = _make_fake_tree()
+    rng = npr.default_rng(666)
+    # take all t0s in first split
+    set1, set2 = set_sampling.get_anml_sample_allt0(root, .667, rng)
+    trcv_ids = _get_file_ids(set1)
+    assert(trcv_ids == [0, 2, 5, 4, 6, 7, 11, 9])
+    assert(_get_file_ids(set2) == [1, 3, 8, 10])
+    # switching sample on set1 (train/cv)
+    train_set, cv_set = set_sampling.get_anml_sample_switch(set1, .5,
+                                                            4, 2, 0, rng)
+    train_ids = _get_file_ids(train_set)
+    assert(train_ids == [0, 4, 7, 11])
+    assert(set(train_ids).issubset(set(trcv_ids)))
+    cv_ids = _get_file_ids(cv_set)
+    assert(cv_ids == [2, 5, 6, 9])
+    assert(set(cv_ids).issubset(trcv_ids))
+    assert(set(cv_ids).isdisjoint(train_ids))
+
+    # TODO: what about t0s???
+    # given root set is not a great test set for this
+
+
 if __name__ == '__main__':
     test_depth()
     test_idx_mapping()
@@ -246,3 +277,4 @@ if __name__ == '__main__':
     test_animal_sampler()
     test_drawer()
     test_drawer_t0()
+    test_double_sample()

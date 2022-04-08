@@ -43,7 +43,7 @@ def clone_single_file(old_file: SingleFile):
     return SingleFile(old_file.idn,
                       old_file.t_file_name, old_file.id_file_name, old_file.t0_sample_file_name,
                       old_file.t_file_shape, old_file.id_file_shape, old_file.t0_file_shape,
-                      old_file.dtypes)
+                      old_file.dtypes, old_file.t0_sample_dtype)
 
 
 def map_idx_to_file(root_set: FileSet, set_idx: List[int], file_idx: int):
