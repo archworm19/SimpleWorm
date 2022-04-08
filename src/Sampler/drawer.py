@@ -49,7 +49,6 @@ class TDrawer:
         Returns:
             np.ndarray: boolean array of len = len(t0s)
         """
-
         return t0s <= ar_len - self.twindow_size
 
     def _init_file_map(self, filez: List[file_reps.SingleFile]):
