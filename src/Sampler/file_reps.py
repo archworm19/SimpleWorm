@@ -204,19 +204,77 @@ def get_depths(root_set: FileSet):
     return _get_depths_helper(root_set, 0)
 
 
-def get_files(cset: FileSet):
-    """Get all file leaves
+def _get_files(cset: FileSet,
+               cpath: List[int]):
+    # helper func
+    if len(cset.sub_sets) == 0:
+        return [cpath], [cset.files]
+    ret_paths, ret_subs = [], []
+    for i, sub_set in enumerate(cset.sub_sets):
+        rpath, rsubs = _get_files(sub_set,
+                                  cpath + [i])
+        ret_paths.extend(rpath)
+        ret_subs.extend(rsubs)
+    return ret_paths, ret_subs
+
+
+def get_files_struct(cset: FileSet):
+    """Get all file leaves in structured format
 
     Args:
         cset (FileSet): current set
             should typically be the root of the set tree
 
     Returns:
-        List[SingleFile]
+        List[List[int]]: paths
+        List[List[SingleFile]]: filez
     """
-    if len(cset.sub_sets) == 0:
-        return cset.files
-    ret_files = []
-    for child in cset.sub_sets:
-        ret_files.extend(get_files(child))
-    return ret_files
+    return _get_files(cset, [])
+
+
+def get_files(cset: FileSet):
+    """Get files in flattened format
+
+    Args:
+        cset (FileSet): current set
+            should typically be the root of the set tree
+    
+    Returns:
+        List[SingleFile]: filez
+    """
+    _, struct_files = get_files_struct(cset)
+    filez = []
+    for fs in struct_files:
+        filez.extend(fs)
+    return filez
+
+
+def _get_num_sets_lvl(cset: FileSet, lvl: int,
+                      cpath: List[int]):
+    # helper func
+    if lvl == 0:
+        return [cpath], [len(cset.sub_sets)]
+    ret_paths, ret_subs = [], []
+    for i, sub_set in enumerate(cset.sub_sets):
+        rpath, rsubs = _get_num_sets_lvl(sub_set, lvl-1,
+                                         cpath + [i])
+        ret_paths.extend(rpath)
+        ret_subs.extend(rsubs)
+    return ret_paths, ret_subs
+
+
+def get_num_sets_lvl(cset: FileSet, lvl: int):
+    """Get the number of subsets at the given level
+
+    Args:
+        cset (FileSet): root of set sys
+        lvl (int): current set
+            should typically be the root of the set tree
+        
+    Returns:
+        List[List[int]]: path representation
+        List[int]: number of substs for each set at
+            the given level
+            Corresponds to path rep
+    """
+    return _get_num_sets_lvl(cset, lvl, [])
