@@ -33,6 +33,12 @@ class Flattener:
         self.dep_id_mask = dep_id_mask
         self.indep_t_mask = indep_t_mask
         self.indep_id_mask = indep_id_mask
+        # save shapes:
+        assert(np.shape(self.dep_t_mask) == np.shape(self.indep_t_mask)), "mask mismatch"
+        assert(np.shape(self.dep_id_mask) == np.shape(self.indep_id_mask)), "mask mismatch"
+        assert(len(np.shape(self.indep_id_mask)) == 1), "id mask must be flat"
+        self.t_shape = list(np.shape(self.dep_t_mask))
+        self.id_shape = list(np.shape(self.dep_id_mask))
 
     def _fselection(self, num_sample: int, mask: np.ndarray):
         """ar_sample has multiple samples. Mask does not
@@ -68,7 +74,7 @@ class Flattener:
 
         Args:
             dat_tseries (np.ndarray): num_samples x T x ... array
-            dat_ids (np.ndarray): num_sampels x M array
+            dat_ids (np.ndarray): num_samples x M array
                 NOTE: both can be np memmap arrays too
 
         Returns:
@@ -122,8 +128,10 @@ class Flattener:
         # approach: initialize unflattened data in correct
         # shape with nans = unflat
         # > flatten and mask unflat --> assign to flattened data
-        unflat_t = np.nan * np.ones(([num_sample, self.window_size] + list(np.shape(self.data)[1:])))
-        unflat_id = np.nan * np.ones(([num_sample] + list(np.shape(self.ident_dat)[1:])))
+        c_t_shape = [num_sample] + self.t_shape
+        c_id_shape = [num_sample] + self.id_shape
+        unflat_t = np.nan * np.ones(c_t_shape)
+        unflat_id = np.nan * np.ones(c_id_shape)
         unflat_l = [unflat_t, unflat_id]
         split_pt = int(np.sum(umasks[0]))
         flat_l = [dat_flat[:, :split_pt], dat_flat[:, split_pt:]]
