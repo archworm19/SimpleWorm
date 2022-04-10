@@ -130,9 +130,7 @@ class LeafFileSplitter(FileSamplerStrat):
         self.sample_map = sample_map
     
     def sample(self, set_path: List[int], current_set: file_reps.FileSet):
-        if len(current_set.files) > 0:
-            return []
-        return self.sample[str(set_path)]
+        return self.sample_map[str(set_path)]
 
 
 # t0 strats
@@ -260,11 +258,11 @@ def _get_anml_sample(root_set: file_reps.FileSet,
     file_strat1, file_strat2 = build_comp_files(root_set, anml_sample_prob, rng)
 
     # primary set:
-    new_set1 = file_reps.FileSet([], None)
+    new_set1 = file_reps.FileSet([], [])
     exe_plan([], new_set1, root_set, set_strat, file_strat1, t0_strat1)
 
     # complementary set:
-    new_set2 = file_reps.FileSet([], None)
+    new_set2 = file_reps.FileSet([], [])
     exe_plan([], new_set2, root_set, set_strat, file_strat2, t0_strat2)
     return new_set1, new_set2
 

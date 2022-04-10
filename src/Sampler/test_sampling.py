@@ -25,9 +25,9 @@ def _make_fake_tree():
             f = file_reps.save_file(i*3 + j, "TEMP", t_ar, id_ar, t0_samples)
             ss.files.append(f)
         sub_sets.append(ss)
-    top_set0 = file_reps.FileSet(sub_sets[:2], None)
-    top_set1 = file_reps.FileSet(sub_sets[2:], None)
-    root = file_reps.FileSet([top_set0, top_set1], None)
+    top_set0 = file_reps.FileSet(sub_sets[:2], [])
+    top_set1 = file_reps.FileSet(sub_sets[2:], [])
+    root = file_reps.FileSet([top_set0, top_set1], [])
     return root
 
 
@@ -52,94 +52,33 @@ def test_idx_mapping():
                 count += 1
 
 
-# just return the file
-class IDFP(set_sampling.FilePlan):
-    def __init__(self):
-        pass
-    def sample_file(self, target_file: file_reps.SingleFile):
-        return copy.deepcopy(target_file)
-
-
 def test_sample_exe():
     # fake tree --> 2 top-level > 2 each > 3 files
     root = _make_fake_tree()
 
-    # keep top level + split 2nd level:
-    pl_root = set_sampling.Plan(0, [], {})
-    for i in range(2):
-        vi = set_sampling.Plan(i, [], {})
-        pl_root.sub_plan.append(vi)
-        for j in [0]:
-            vj = set_sampling.Plan(j, [], {})
-            vi.sub_plan.append(vj)
-            for k in range(3):
-                vj.sub_files[k] = IDFP()
+    rng = npr.default_rng(42)
 
+    # split on second level
     newset0 = file_reps.FileSet([], None)
-    set_sampling.exe_plan(newset0, root, pl_root)
+    set_strat, _ = set_sampling.build_comp_sets(root, 1, 0.5, rng)
+    file_strat, _ = set_sampling.build_comp_files(root, 1., rng)
+    t0_strat = set_sampling.Allt0Strat()
+    set_sampling.exe_plan([], newset0, root, set_strat, file_strat, t0_strat)
     filez = file_reps.get_files(newset0)
-    exp_idns = set([0,1,2,6,7,8])
-    assert(len(filez) == 6)
-    for fi in filez:
-        assert(fi.idn in exp_idns)
+    exp_idns = {3, 4, 5, 6, 7, 8}
+    f_idns = set([fi.idn for fi in filez])
+    assert(exp_idns.issubset(f_idns) and exp_idns.issuperset(f_idns))
     
     # split on top level
-    # also an implicit test of deep copying
-    pl_root = set_sampling.Plan(0, [], {})
-    for i in [1]:
-        vi = set_sampling.Plan(i, [], {})
-        pl_root.sub_plan.append(vi)
-        for j in [0, 1]:
-            vj = set_sampling.Plan(j, [], {})
-            vi.sub_plan.append(vj)
-            for k in range(3):
-                vj.sub_files[k] = IDFP()
-
     newset0 = file_reps.FileSet([], None)
-    set_sampling.exe_plan(newset0, root, pl_root)
+    set_strat, _ = set_sampling.build_comp_sets(root, 0, 0.5, rng)
+    file_strat, _ = set_sampling.build_comp_files(root, 1., rng)
+    t0_strat = set_sampling.Allt0Strat()
+    set_sampling.exe_plan([], newset0, root, set_strat, file_strat, t0_strat)
     filez = file_reps.get_files(newset0)
-    exp_idns = set([6,7,8,9,10,11])
-    assert(len(filez) == 6)
-    for fi in filez:
-        assert(fi.idn in exp_idns)
-
-
-def test_level_splitter_creation():
-    # fake tree --> 2 top-level > 2 each > 3 files
-    root = _make_fake_tree()
-
-    assert(len(file_reps.get_files(root)) == 12)
-
-    rng = npr.default_rng(666)
-
-    file_plan = set_sampling.RandFilePlan(0.5, rng)
-
-    # split at top level:
-    p1, p2 = set_sampling.level_sample_planner(root, 0, 0.5, file_plan, file_plan,
-                                               rng)
-
-    # execute plans --> get file idns:
-    newset1 = file_reps.FileSet([], None)
-    newset2 = file_reps.FileSet([], None)
-    set_sampling.exe_plan(newset1, root, p1)
-    set_sampling.exe_plan(newset2, root, p2)
-    files1 = np.sort([f.idn for f in file_reps.get_files(newset1)])
-    files2 = np.sort([f.idn for f in file_reps.get_files(newset2)])
-    assert(np.sum(files1 != np.arange(6)) < 1)
-    assert(np.sum(files2 != np.arange(6,12)) < 1)
-
-    # split at file level:
-    p1, p2 = set_sampling.level_sample_planner(root, 2, 0.667, file_plan, file_plan, rng)
-
-    # execute plans --> get file idns:
-    newset1 = file_reps.FileSet([], None)
-    newset2 = file_reps.FileSet([], None)
-    set_sampling.exe_plan(newset1, root, p1)
-    set_sampling.exe_plan(newset2, root, p2)
-    files1 = np.sort([f.idn for f in file_reps.get_files(newset1)])
-    files2 = np.sort([f.idn for f in file_reps.get_files(newset2)])
-    assert(np.sum(files1 - np.array([0, 2, 3, 4, 6, 8, 9, 10])) < .00001)
-    assert(np.sum(files2 - np.array([1, 5, 7, 11])) < .00001)
+    exp_idns = {0, 1, 2, 3, 4, 5}
+    f_idns = set([fi.idn for fi in filez])
+    assert(exp_idns.issubset(f_idns) and exp_idns.issuperset(f_idns))
 
 
 def _make_fake_files(t0_sub: bool = False):
@@ -273,7 +212,6 @@ if __name__ == '__main__':
     test_depth()
     test_idx_mapping()
     test_sample_exe()
-    test_level_splitter_creation()
     test_animal_sampler()
     test_drawer()
     test_drawer_t0()
