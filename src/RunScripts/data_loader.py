@@ -1,7 +1,9 @@
 """Hardcoded functions to get worm data in correct format"""
+import imp
 from typing import List
 import os
 import copy
+from Sampler import file_reps
 import numpy as np
 import utils
 
@@ -198,6 +200,17 @@ def _select_subsets(dsets: List[List[np.ndarray]],
 
 def load_all_data():
     """Hardcoded function to represent all data
+
+    Returns:
+        List[List[np.ndarray]]: cell clusters
+            set > animal
+            array = T x num cell clusts
+        List[List[np.ndarray]]: identity arrays
+            set > animal
+            array = T x dims
+            0th column = time
+        List[List[str]]: cell cluster names
+            set
     """
     rdir = '/Users/ztcecere/Data/ProcCellClusters'
     # filenames
@@ -238,11 +251,12 @@ def load_all_data():
     dmat = utils.get_all_array_dists(cell_clusts[0] + cell_clusts[1] + cell_clusts[2])
     print('min defined tday distance: {0}'.format(np.nanmin(dmat)))
 
-    return cell_clusts, all_ids, [zim_op50_cells, npal_op50_cells, nostim_cells]
+    return cell_clusts, all_ids, [zim_op50_cells, npal_op50_cells, nostim_cells], ["zim", "npal", "nostim"]
 
 
 if __name__ == '__main__':
-    cc, ids, cellz = load_all_data()
+    from utils import build_file_set
+    cc, ids, cellz, set_names = load_all_data()
     print(cellz)
     import pylab as plt
     for k, v in enumerate(cc):
@@ -256,3 +270,17 @@ if __name__ == '__main__':
             plt.plot(vi[:,6])
             plt.show()
     
+    # testing file pkging
+    for set_clusts, set_ids, set_name in zip(cc, ids, set_names):
+        t0_ars = [np.arange(len(sii)) for sii in set_ids]
+        file_set = build_file_set(set_clusts, set_ids, t0_ars, set_name)
+
+        """
+        # TESTING: load the file:
+        filez = file_reps.get_files(file_set)
+        t_dat, id_dat, t0_dat = file_reps.open_file(filez[0])
+        print(t_dat[100:120,:])
+        print(id_dat[100:120])
+        print(t0_dat[100:120])
+        input('cont?')
+        """

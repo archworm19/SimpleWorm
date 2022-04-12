@@ -109,9 +109,9 @@ def save_file(file_id: int, file_root: str,
         SingleFile: 
     """
     assert(t_ar.dtype == id_ar.dtype), "arrays must have same type"
-    t_file_name = "{0}_{1}".format(file_root, "t_file.dat")
-    id_file_name = "{0}_{1}".format(file_root, "id_file.dat")
-    t0_file_name = "{0}_{1}".format(file_root, "t0_samples.dat")
+    t_file_name = "{0}_{1}_{2}".format(file_root, str(file_id), "t_file.dat")
+    id_file_name = "{0}_{1}_{2}".format(file_root, str(file_id), "id_file.dat")
+    t0_file_name = "{0}_{1}_{2}".format(file_root, str(file_id), "t0_samples.dat")
     # make the file --> copy data in
     t_dat = np.memmap(t_file_name, dtype=t_ar.dtype,
                       mode='w+', shape=np.shape(t_ar))

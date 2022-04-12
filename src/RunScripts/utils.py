@@ -206,33 +206,8 @@ def build_standard_id(setz: List[List[np.ndarray]],
 # file reps
 
 
-def pkg_into_single_file(ar: np.ndarray, base_id: np.ndarray,
-                          idn: int, base_fn: str, add_t0: bool = True):
-    """Package numpy arrays (array of cell activity + base identity)
-    into 
-
-    Args:
-        ar (np.ndarray): cell activity array
-            T x N array
-        base_id (np.ndarray): identity marker
-            len M array
-        idn (int): id number
-        base_fn (str): base filename
-        add_t0 (True): whether to add_t0 to the beginning
-            of the file
-
-    Returns:
-        Sampler.file_reps.SingleFile
-    """
-    t0_ar = np.arange(len(ar))
-    id_tile = np.tile(base_id[None], (len(ar), 1))
-    if add_t0:
-        id_tile = np.hstack((t0_ar[:,None], id_tile))
-    return file_reps.save_file(idn, base_fn, ar, id_tile, t0_ar)
-
-
-def build_file_set(ars: List[np.ndarray], base_id: np.ndarray,
-                    base_fn: str, add_t0: bool = True):
+def build_file_set(ars: List[np.ndarray], id_ars: List[np.ndarray],
+                    t0_ars: List[np.ndarray], base_fn: str):
     """Build a file set (and memmap files) from related arrays
     > Related arrays = typically coming from the same animal strain
     + exposed to same conditions
@@ -240,15 +215,14 @@ def build_file_set(ars: List[np.ndarray], base_id: np.ndarray,
     Args:
         ars (List[np.ndarray]): cell activity arrays each array
             = T x N
-        base_id (np.ndarray): base_id len m array that describes
-            all animals
+        id_ars (List[np.ndarray]): identity arrays
+            = T x M
+        t0_ars (List[np.ndarray]): t0 arrays
+            = len T
         base_fn (str): base file name
-        add_t0 (bool, optional): whether to add_t0 to the beginning
-            of the file
     """
     filez = []
     for i, ar in enumerate(ars):
-        filez.append(pkg_into_single_file(ar, base_id, i, base_fn,
-                                          add_t0))
+        filez.append(file_reps.save_file(i, base_fn, ar, id_ars[i], t0_ars[i]))
     file_set = file_reps.FileSet([], filez)
     return file_set
