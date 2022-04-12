@@ -225,4 +225,4 @@ def build_file_set(ars: List[np.ndarray], id_ars: List[np.ndarray],
     for i, ar in enumerate(ars):
         filez.append(file_reps.save_file(i, base_fn, ar, id_ars[i], t0_ars[i]))
     file_set = file_reps.FileSet([], filez)
-    return file_set
+    return file_set.open_file()
