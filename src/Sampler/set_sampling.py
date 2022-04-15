@@ -39,7 +39,7 @@ class FileSamplerStrat(abc.ABC):
     # which subfiles to sample
     def sample(self, set_path: List[int],
                current_set: file_reps.FileSet):
-        # Returns: List[int] = indicies of children to use
+        # Returns: List[int] = indices of children to use
         pass
 
 
@@ -300,6 +300,52 @@ def get_anml_sample_switch(root_set: file_reps.FileSet,
 def get_anml_sample_allt0(root_set: file_reps.FileSet,
                           anml_sample_prob: float,
                           rng: npr.Generator):
+    # get animal sample + take all t0s from selected files
     t0_strat = Allt0Strat()
     return _get_anml_sample(root_set, t0_strat, t0_strat,
                             anml_sample_prob, rng)
+
+
+def sample_avail_files(root_set: file_reps.FileSet,
+                       target_cell: int):
+    """Sample available files
+    'Available files' = files that have no nans
+        for the target cell
+    ASSUMES: time series shape for files = T x N
+        where N = number of cells
+
+    Args:
+        root_set (file_reps.FileSet):
+        target_cell (int): target cell that
+            must be defined for all timepoints
+    
+    Returns:
+        file_reps.FileSet: root of deepcopy of
+            subset
+    """
+    # this class is internal as it's not generally useful
+    class CFileSampler(FileSamplerStrat):
+        # only select files at leaves; select no internal files 
+        def __init__(self, tcell):
+            self.target_cell = tcell
+        
+        # Returns: List[int] = indices of children to use
+        def sample(self, set_path: List[int], current_set: file_reps.FileSet):
+            inds = []
+            for i, fi in enumerate(current_set.files):
+                tdat, _, _ = file_reps.open_file(fi)
+                vnan = np.sum(np.isnan(tdat[:, self.target_cell]))
+                if vnan < 1:
+                    inds.append(i)
+            return inds
+    
+    # strats:
+    # None --> never split; select all
+    set_strat = LvlSplitter(None, {})
+    file_strat = CFileSampler(target_cell)
+    t0_strat = Allt0Strat()
+
+    new_set = file_reps.FileSet([], [])
+    exe_plan([], new_set, root_set,
+             set_strat, file_strat, t0_strat)
+    return new_set

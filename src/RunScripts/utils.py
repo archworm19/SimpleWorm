@@ -226,3 +226,23 @@ def build_file_set(ars: List[np.ndarray], id_ars: List[np.ndarray],
         filez.append(file_reps.save_file(i, base_fn, ar, id_ars[i], t0_ars[i]))
     file_set = file_reps.FileSet([], filez)
     return file_set.open_file()
+
+
+def build_multi_file_set(ars: List[List[np.ndarray]], id_ars: List[List[np.ndarray]],
+                            base_fn: str):
+    """Build a file set for each subset (builds numpy memmap files too)
+    Assumes: sample all t0s
+
+    Args:
+        ars (List[List[np.ndarray]]): cell activity arrays each array
+            = T x N
+        id_ars (List[List[np.ndarray]]): identity arrays
+            = T x M
+        base_fn (str): base file name
+    """
+    root_set = file_reps.FileSet([], [])
+    for i in range(len(ars)):
+        ct0_ars = [np.arange(len(ar)) for ar in ars[i]]
+        sub_set = build_file_set(ars[i], id_ars[i], ct0_ars, "{0}_{1}".format(base_fn, str(i)))
+        root_set.sub_sets.append(sub_set)
+    return root_set
