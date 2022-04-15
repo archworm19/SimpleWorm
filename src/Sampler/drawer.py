@@ -143,3 +143,38 @@ class TDrawer:
             t_samp.append(ti)
             id_samp.append(idi)
         return np.array(t_samp), np.array(id_samp)
+
+    def draw_all_samples(self,
+                         cumulative_t0_buf: int = None):
+        """Draw all samples
+        Bulk load
+        --> high speed
+        --> high memory cost
+
+        Arguments:
+            cumulative_t0_buf (int): if not None -->
+                t0s = accumulate across animals
+                    with buffer specified
+                Ex: [[0,1,2], [0,1]] + 5=buf -->
+                    [[0,1,2], [7,8]]
+        
+        Returns:
+            List[np.ndarray]: time series data
+                each array = different animal
+            List[np.ndarray]: id data
+                each array = different animal
+            List[np.ndarray]: t0 data
+                each array = different animal
+        """
+        all_dat, all_id, all_t0 = [], [], []
+        cum_t0 = 0
+        for fi in self.filez:
+            ct_dat, cid_dat, ct0s = file_reps.open_file(fi)
+            all_dat.append(ct_dat)
+            all_id.append(cid_dat)
+            if cumulative_t0_buf is None:
+                all_t0.append(ct0s)
+            else:
+                all_t0.append(cum_t0 + ct0s)
+                cum_t0 + np.amax(ct0s) + 1 + cumulative_t0_buf
+        return all_dat, all_id, all_t0

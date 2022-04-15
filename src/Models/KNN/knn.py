@@ -1,10 +1,102 @@
 """K Nearest Neighbor Model
 
 """
+import Sampler
 import numpy as np
 import numpy.random as npr
 from Models.KNN.clustering import wGMM
-from Sampler.sampler_iface import SamplerIface
+
+from Sampler.drawer import TDrawer
+from Sampler.flattener import Flattener
+
+
+# TODO: get this moved over to
+# 1. Multiprocessing
+# 2. New Sampling strat
+
+
+class WindowSelectorSmall:
+    # TODO: consider adding 'Large' version
+    # operates on the drawer directly
+    """Select Non-Overlapping windows in order
+        of similarity to a target window
+        
+        Small? Assumes all of the data can fit comfortably in memory
+            = takes in indep_dat as vstacked array"""
+    def __init__(self):
+        pass
+
+    def _calc_weights(self,
+                      indep_sample: np.ndarray,
+                      full_indep_set: np.ndarray,
+                      variance_i: np.ndarray):
+        """Calculate the weights between 1 sample
+        of indepenent dims and all of training independent samples.
+        IMPORTANT NOTE: return payload is NOT normalized
+
+        Args:
+            indep_sample (np.ndarray): len N sample of independent dims
+            full_indep_set (np.ndarray): full set of independent samples
+                num_sample x N
+            variance_i (np.ndarray): len N array representing single
+                variance entry
+
+        Returns:
+            np.ndarray: len [num training samples] array of weights
+                = exp(-1 * sum((indep_sample - train_sample)^2 / variance_i))
+        """
+        raw_diff = (full_indep_set - indep_sample[None])**2.
+        quot = -1. * np.sum(raw_diff * (1. / variance_i[None]), axis=1)
+        return np.exp(quot)
+
+    def _select_nonolap_windows(self,
+                                weights: np.ndarray,
+                                win_starts: np.ndarray,
+                                twindow_size: int):
+        """Select non-overlapping windows according to
+        weights (maximize) using Greedy strategy
+
+        Arguments:
+            weights (np.ndarray): len N array of weighted distances
+            win_starts (np.ndarray): len N array of window starts
+                NOTE: assumes win_starts = cumulative across animals
+            twindow_size (int): size of each timewindow
+
+        Returns:
+            np.ndarray: indices (into wdists and win_starts)
+                of greedily chosen samples
+                in descending weight order
+        """
+        # initialize the colouring structure ~ use to guarantee no overlap
+        minwin = int(np.amin(win_starts))
+        maxwin = int(np.amax(win_starts))
+        colours = np.zeros((maxwin + twindow_size - minwin))
+        # iter thru wdists in reverse sorted order (large best)
+        sinds = np.argsort(weights)[::-1]
+        ret_inds = []
+        for ind in sinds:
+            # check if overlaps with an already-used window
+            st = int(win_starts[ind] - minwin)
+            ed = int(st + twindow_size)
+            if np.sum(colours[st:ed] > 0.5):
+                continue
+            ret_inds.append(ind)
+            colours[st:ed] = 1
+        return np.array(ret_inds)
+
+
+"""
+# TODO: where should this be?
+self.drawer = drawer
+self.flattener = flattener
+
+# TODO: unpack all data = the SMALL assumption:
+# ... umm: this should probably not be in window selector
+# .. should be passed in!
+t_dat, id_dat, t0s = self.drawer.draw_all_samples()
+self.indep_dat, self.dep_dat = flattener.flatten_samples(np.vstack(t_dat), np.vstack(id_dat))
+"""
+
 
 # TODO: model interface?
 class KNN:
