@@ -10,20 +10,17 @@ import numpy.random as npr
 import tensorflow as tf
 
 
-DRNG = npr.default_rng(42)
-
-
 # utilities
 
 
-def var_construct(v_shape: List[int], v_scale: int = 1.):
+def var_construct(rng: npr.Generator, v_shape: List[int], v_scale: int = 1.):
     """Construct a uniform random tensorflow variable
     of specified shape
 
     Args:
         v_shape (List[int]): full shape of variable
     """
-    v_np = v_scale * (DRNG.random(v_shape) - 0.5)
+    v_np = v_scale * (rng.random(v_shape) - 0.5)
     return tf.Variable(v_np.astype(np.float32))
 
 
@@ -58,7 +55,8 @@ class LayerBasic(LayerIface):
     def __init__(self,
                  num_models: int,
                  xshape: List[int],
-                 width: int):
+                 width: int,
+                 rng: npr.Generator):
         """Initialize a basic layer
 
         Args:
@@ -66,16 +64,17 @@ class LayerBasic(LayerIface):
             xshape (List[int]): shape of extra dimensions
                 doesn't include parallel models or batch_size
             width (int): number of outputs from the layer
+            rng (npr.Generator): numpy random generator
         """
+        self.rng = rng
         # coefficients
-        self.w = var_construct([num_models, width] + xshape)
+        self.w = var_construct(rng, [num_models, width] + xshape)
         self.wop = tf.expand_dims(self.w, 0)
         # offsets
-        self.offset = var_construct([num_models, width])
+        self.offset = var_construct(rng, [num_models, width])
         # first 3 dims are batch_size, parallel models, width
         # --> should not be reduced
         self.reduce_dims = [3 + i for i in range(len(xshape))]
-        self.x_reshape = [-1, 1, 1] + xshape
 
     def eval(self, x):
         """Basic evaluation
@@ -88,8 +87,10 @@ class LayerBasic(LayerIface):
             TODO/TYPE: reduced tensor
                 batches x parallel models x width
         """
-        x2 = tf.reshape(x, self.x_reshape)
-        return self.offset + tf.math.reduce_sum(x2 * self.wop,
+        # add dims for parallel models and width
+        x = tf.expand_dims(x, 1)
+        x = tf.expand_dims(x, 1)
+        return self.offset + tf.math.reduce_sum(x * self.wop,
                                                 axis=self.reduce_dims)
 
     def l2(self):
@@ -100,54 +101,46 @@ class LayerBasic(LayerIface):
                                    axis=[0] + self.reduce_dims)
 
 
-class LayerLowRankTseries(LayerIface):
+class LayerLowRankFB(LayerIface):
+    # ... designed with flat models in mind
+    # FilterBank: within layer, share a bank of filters across models/widths
+    # FB (filter bank) = low_dim x dims
+    # W = num_model x width x low_dim x dims
 
     def __init__(self,
                  num_models: int,
-                 ch_dim: int,
-                 t_dim: int,
-                 lowrank: int,
-                 width: int):
-        """Initialize a low rank, time-series layer
-        Specifically designed with timeseries in mind
-        > w shape = width x ch_dim x t_dim
-        and reduce along ch_dim, t_dim
-        > low-rank input transformation:
-        > > w_ch = width x ch_dim x q x t_dim
-        > > w_t = 1 x 1 x q x t_dim *
-        > > broadcast + reduce q --> w_shape
-        > Variable comparison
-        > Ex: width=3; dim_ch = 5; dim-t = 10; q=2
-        # > > rull-rank = 150
-        # > > low-rank = 30 + 20 = 50
-        # > > low-rank + q=1: 15 + 10 = 25
-
-        * forces sharing of w_t components
-        across widths
+                 xshape: List[int],
+                 width: int,
+                 low_dim: int,
+                 rng: npr.Generator):
+        """Initialize a low rank, FilterBank (FB) layer
 
         Args:
             num_models (int): number of parallel models
-            dim_ch (int): number of input dimensions along channel
-                axis = number of channels
-            dim_t (int): number of input dimensions along timeseries
-                axies = timeseries length
-            lowrank (int): the rank constraint
+            xshape (List[int]): shape of extra dimensions
+                doesn't include parallel models or batch_size
             width (int): number of outputs from the layer
+            low_dim (int): limiting dimension
+                filter bank = low_dim x xshape (other dims)
+            rng (npr.Generator): numpy random generator
         """
+        self.rng = rng
         # coefficients
-        self.w_ch = var_construct([num_models, width, ch_dim, lowrank, 1], 2.)
-        self.w_t = var_construct([num_models, 1, 1, lowrank, t_dim], 2.)
-        # --> num_models x width x ch_dim x lowrank x t_dim
-        wbig = self.w_ch * self.w_t
+        # NOTE: scales up coeffs to make up for squaring
+        self.fb = var_construct(rng, [low_dim] + xshape, 2.)
+        self.wb = var_construct(rng, [num_models, width, low_dim] + xshape, 2.)
+        # --> num_models x width x low_dim x xshape
+        wbig = (tf.reshape(self.fb, [1, 1, low_dim] + xshape) *
+                    tf.reshape(self.wb, [num_models, width, low_dim] + xshape))
+    
         # offsets
-        self.offset = var_construct([num_models, width])
+        self.offset = var_construct(rng, [num_models, width])
         # reduce along lowrank
-        # --> num_models x width x ch_dim x t_dim
-        self.w = tf.reduce_sum(wbig, axis=[3])
+        # --> num_models x width x xshape
+        self.w = tf.reduce_sum(wbig, axis=[2])
         self.wop = tf.expand_dims(self.w, 0)
         # protected dims: batch, num_model x width
-        self.reduce_dims = [3,4]
-        self.x_reshape = [-1, 1, 1] + [ch_dim, t_dim]
+        self.reduce_dims = [3 + i for i in range(len(xshape))]
     
     def eval(self, x):
         """Basic evaluation
@@ -160,8 +153,10 @@ class LayerLowRankTseries(LayerIface):
             TODO/TYPE: reduced tensor
                 batches x parallel models x width
         """
-        x2 = tf.reshape(x, self.x_reshape)
-        return self.offset + tf.math.reduce_sum(x2 * self.wop,
+        x = tf.expand_dims(x, 1)
+        x = tf.expand_dims(x, 1)
+        # add dims for parallel models and width
+        return self.offset + tf.math.reduce_sum(x * self.wop,
                                                 axis=self.reduce_dims)
 
     def l2(self):
@@ -194,20 +189,23 @@ class LayerFactoryBasic(LayerFactoryIface):
     def __init__(self,
                  num_models: int,
                  xshape: List[int],
-                 width: int):
+                 width: int,
+                 rng: npr.Generator):
         """Build the factory (which will build layers)
 
         Args:
             num_models (int): number of parallel models
             xshape (List[int]): shape of input dims
             width (int): number of outputs for each model
+            rng (npr.Generator): numpy random generator
         """
+        self.rng = rng
         self.num_models = num_models 
         self.xshape = xshape
         self.width = width
     
     def build_layer(self):
-        return LayerBasic(self.num_models, self.xshape, self.width)
+        return LayerBasic(self.num_models, self.xshape, self.width, self.rng)
     
     def get_width(self):
         return self.width
@@ -216,14 +214,14 @@ class LayerFactoryBasic(LayerFactoryIface):
         return self.num_models
 
 
-class LayerFactoryLowRankTseries(LayerFactoryIface):
+class LayerFactoryLowRankFB(LayerFactoryIface):
 
     def __init__(self,
                  num_models: int,
-                 dim_ch: int,
-                 dim_t: int,
-                 low_rank: int,
-                 width: int):
+                 xshape: List[int],
+                 width: int,
+                 low_dim: int,
+                 rng: npr.Generator):
         """Build Factory for building low-rank
         layers. Low-rank layers are only compatible
         with square, matrix inputs ~ primarily
@@ -231,18 +229,17 @@ class LayerFactoryLowRankTseries(LayerFactoryIface):
 
         Args:
             num_models (int): number of parallel models
-            dim_ch (int): number of input dimensions along channel
-                axis = number of channels
-            dim_t (int): number of input dimensions along timeseries
-                axies = timeseries length
-            lowrank (int): the rank constraint
+            xshape (List[int]): shape of input dims
             width (int): number of outputs for each model
+            low_dim (int): limiting dimension
+                filter bank = low_dim x xshape (other dims)
+            rng (npr.Generator): numpy random generator
         """
+        self.rng = rng
         self.num_models = num_models
-        self.dim_ch = dim_ch
-        self.dim_t = dim_t
-        self.low_rank = low_rank
+        self.xshape = xshape
         self.width = width
+        self.low_dim = low_dim
 
     def get_num_models(self):
         return self.num_models
@@ -251,8 +248,5 @@ class LayerFactoryLowRankTseries(LayerFactoryIface):
         return self.width
     
     def build_layer(self):
-        return LayerLowRankTseries(self.num_models,
-                                   self.dim_ch,
-                                   self.dim_t,
-                                   self.low_rank,
-                                   self.width)
+        return LayerLowRankFB(self.num_models, self.xshape, self.width,
+                                self.low_dim, self.rng)
