@@ -1,5 +1,8 @@
 """Testing forest components"""
+from turtle import width
+from typing import List
 from Models.SoftTree import layers
+from Models.SoftTree import forest
 import tensorflow as tf
 import numpy as np
 import numpy.random as npr
@@ -25,7 +28,6 @@ def test_layers():
     # first 3 = batch_size, num_model, width (reduce across xshape)
     assert(layer1.reduce_dims == [3, 4])
     
-
     # low rank layers
     low_dim = 2
     LFLR = layers.LayerFactoryLowRankFB(num_models, xshape, width, low_dim, rng)
@@ -38,6 +40,81 @@ def test_layers():
     assert(np.shape(layer3.wb.numpy()) == tuple([num_models, width, low_dim] + xshape))
 
 
+def _get_layer_ws(node: forest.ForestNode, w_list: List):
+    w_list.append(node.layer.w)
+    for child in node.children:
+        _get_layer_ws(child, w_list)
+
+
+def _build_forest():
+    depth = 3  # 3 levels (2 levels with children)
+    num_models = 15
+    xshape = [12]
+    width = 2  # means layer --> 2 (3 children per parent)
+    low_dim = 4
+    rng = npr.default_rng()
+    LFLR = layers.LayerFactoryLowRankFB(num_models, xshape, width, low_dim, rng)
+    F = forest.build_forest(depth, LFLR)
+    return F, LFLR, depth
+
+
+def _get_num_nodes(depth: int, layer_width: int):
+    nzs = [(layer_width + 1)**de for de in range(depth)]
+    return sum(nzs)
+
+
+def test_forest_build():
+    F, LFLR, depth = _build_forest()
+    width = LFLR.get_width()
+    assert(width + 1 == len(F.root_node.children))
+    for child in F.root_node.children:
+        assert(width + 1 == len(child.children))
+    # look at all the layers
+    w_list = []
+    _get_layer_ws(F.root_node, w_list)
+    num_exp = _get_num_nodes(depth, width)
+    assert(num_exp == len(w_list))
+    # makes sure that all ws are different:
+    for i in range(len(w_list)):
+        ar_i = w_list[i].numpy()
+        for j in range(len(w_list)):
+            if i == j:
+                continue
+            ar_j = w_list[j].numpy()
+            assert(np.sum(ar_i != ar_j) >= 1)
+
+
+def test_eval_forest():
+    batch_size = 16
+    F, LFLR, depth = _build_forest()
+    # layer shape?
+    sample_layer = LFLR.build_layer()
+    w_shape = np.shape(sample_layer.w.numpy())
+    # assuming flattened (which should _build_forest is)
+    [num_models, _layer_width, dims] = w_shape
+    x = tf.ones([batch_size, dims])
+    prs = F.eval(x).numpy()
+    num_leaves = (LFLR.get_width() + 1) ** depth
+    assert(np.shape(prs) == (batch_size, num_models, num_leaves))
+    # check normalization:
+    assert(np.all(np.fabs(np.sum(prs, axis=-1) - 1.) < .00001))
+
+    # 0 check: constant within model
+    # ... models will be different due to different offsets in layers
+    x = tf.zeros([batch_size, dims])
+    prs = F.eval(x).numpy()
+    prs_mod_red = np.sum(prs, axis=1)
+    for i in range(np.shape(prs_mod_red)[0]):
+        assert(np.sum(prs[i] - prs[0]) < .00001)
+
+    # HI check --> full offset dim should disapear
+    x = tf.ones([batch_size, dims]) * 100000
+    prs = F.eval(x).numpy()
+    assert(np.sum(prs[:,:,-1]) < .01)
+
+
 
 if __name__ == '__main__':
     test_layers()
+    test_forest_build()
+    test_eval_forest()

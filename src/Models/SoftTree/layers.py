@@ -48,6 +48,10 @@ class LayerIface(abc.ABC):
         """
         pass
 
+    def get_width(self):
+        """Report the width"""
+        pass
+
 
 
 class LayerBasic(LayerIface):
@@ -67,6 +71,7 @@ class LayerBasic(LayerIface):
             rng (npr.Generator): numpy random generator
         """
         self.rng = rng
+        self.width = width
         # coefficients
         self.w = var_construct(rng, [num_models, width] + xshape)
         self.wop = tf.expand_dims(self.w, 0)
@@ -99,6 +104,9 @@ class LayerBasic(LayerIface):
         """
         return tf.math.reduce_mean(tf.pow(self.wop, 2),
                                    axis=[0] + self.reduce_dims)
+    
+    def get_width(self):
+        return self.width
 
 
 class LayerLowRankFB(LayerIface):
@@ -125,6 +133,7 @@ class LayerLowRankFB(LayerIface):
             rng (npr.Generator): numpy random generator
         """
         self.rng = rng
+        self.width = width
         # coefficients
         # NOTE: scales up coeffs to make up for squaring
         self.fb = var_construct(rng, [low_dim] + xshape, 2.)
@@ -166,6 +175,9 @@ class LayerLowRankFB(LayerIface):
         # does l2 calc in the outer product space
         return tf.math.reduce_mean(tf.pow(self.wop, 2),
                                    axis=[0] + self.reduce_dims)
+
+    def get_width(self):
+        return self.width
 
 # layer factories
 
