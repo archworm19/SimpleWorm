@@ -15,54 +15,135 @@
     > > Handles Log-Likelihood calc
 
 """
+import abc
 import tensorflow as tf
-
-# TODO: I'm not totally sure about this...
-# TODO: I think this is probs right... but gotta dub check
-# REMEMBER: ELBO
-# we want to maximize the evidence lower bound (spiritually similar)
-# = L(Q) in the wiki page
-# L(Q) = -E_Q [log Q(Z) - log p(Z,X)]
-# = sum_Z Q(Z) [log Q(Z) - log p(Z,X)]
-# Q(Z) = the state generation distro = M x N probs (soft tree and mixture probs)
-# log P(Z,X) = log p(X | Z) p(Z) = log p(X | Z) + log p(Z)
-# We'll probably assume the every Z is equally probable --> wipe out that term
-# Q? do we get a posterior like thing?
-# Don't need posterior
-# Just need the Q(Z) term mult by forward probs --> gets us the positive feedback loop required
-# = Q(Z) will learn to favor the states that maximize p(X | Z) !!!
-# WELL: Q(Z) is approximating posterior ~ so, yeah, we're effectively doing posterior thing
-
-# Assuming we nix p(Z) term (just for simplification now)
-# -->
-# max: -sum_Z [ Q(Z) log Q(Z) - Q(Z) log p(X | Z)
-# max: sum_z [ Q(Z) log p(X | Z) - Q(Z) log Q(Z) ]
-# left term is the posterior-like term that makes everything work (reinforcing states that do well!)
-# right term? entropy term == have to consider p(Z) here....
+import numpy as np
+import numpy.random as npr
+from Models.SoftTree.layers import var_construct
 
 
-def compute_elbo(forward_probs, q_probs, prior_probs):
-    """Calculate mixture log likelihoods
-    > M = number of input states
-    > > Ex: dividing neural space into M neighborhoods
-    > N = 'noise' states
-    > > Ex: in each of these spaces, there is decoding uncertainty
-    > > > decoding uncertainty can be capture by N clusters
+class log_prob_iface(abc.ABC):
+    def calc_log_prob(self, x):
+        """Calculate log probability
+
+        Args:
+            x (_type_): input
+                batch_size x d
+
+        Returns:
+            _type_: log probabilities for each batch sample, model, and state
+                batch_size x num_model x num_state
+        """
+        pass
+
+
+def calc_mixture_loglike(x, weights, log_prob_cls: log_prob_iface):
+    """Calculate mixture log-likelihood
+
+    Weight-based Mixture Construction
+    > N total states + states are independent
+    > Calculate log probability within each of the states
+    > Return weighted sum across log probabilities
 
     Args:
-        forward_probs (_type_): forward probabilities for each of
-            the batch_size x num_models x M x N states
-            obtained by compare predictions with truths
-        q_probs (_type_): Q(Z) = approximation of posterior p(Z | X)
-            the batch_size x num_models x M x N states
-            will typically include probabilities that each
-                of the samples is in a given input state
-                and the mixing probabilities (outer product, typically)
-        prior_probs (_type_): p(Z) = prior probability on all Z
-            batch_size x num_models x M x N
-    
+        x (_type_): input
+            batch_size x d
+        weights (_type_): weights
+            batch_size x num_model x num_state
+        log_prob_cls (log_prob_iface): log probability class.
+            implements log_prob_iface interface
+
     Returns:
-        (_type_): evidence lower bound each model / sample
-            = log (forward probabilities) scaled by the posterior
-            batch_size x num_models
+        _type_: mixture log-likelihoods ~ scalar
+
     """
+    return tf.reduce_sum(weights * log_prob_cls.calc_log_prob(x))
+
+
+class GaussFull(log_prob_iface):
+    """Full Variance Gaussian
+    
+    Construction:
+    > Cholesky factorization background
+    > > If A is symmetric, positive-definite, it can be written as A = LL.T
+    where L = lower triangular matrix
+    > > We use LDL.T cholesky factorization
+    > > D = diagonal matrix
+    > > L = lower triangular matrix with 1s on diagonal
+    > > elems of D = singular values (and eigenvalues for pos, def) of A
+    > Inversion of symmetric matrix background
+    > > If A is positive, definite, symmetric (and invertible) --> A^-1 is positive, definite, symmetric
+    > LDL Factorization of Precision
+    > > Since covar is symmetric, invertible (assumed), positive, definie --> precision is symmetric, positive, definite
+    > > Thus, we factorize precision as LDL.T
+    > Determinant of Covariance matrix
+    > > 1. / det(precision matrix)
+    > > det(precision matrix) = prod(D elems)
+    
+    """
+
+    def __init__(self, num_model: int, num_state: int, dim: int, rng: npr.Generator):
+        """Build structures
+
+        Args:
+            num_model (int): number of parallel models
+            num_state (int): number of states for each model
+            dim (int): dimensionality of Gaussian domain
+        """
+        self.dim = dim
+        self.mu = var_construct(rng, [num_model, num_state, dim])
+
+        # precision construction
+        diag_mask = np.diag(np.ones((dim,)))
+        base_tril_mask = np.tril(np.ones((dim,)))
+        tril_mask = base_tril_mask * (1 - diag_mask) + diag_mask
+        L_base = var_construct(rng, [num_model, num_state, dim, dim])
+        D_base = var_construct(rng, [num_model, num_state, dim, dim])
+        # --> num_model x num_state x dim x dim; and each dim x dim matrix is LD constructed
+        self.L = L_base * tf.constant(tril_mask[None, None].astype(np.float32))
+        self.D = D_base * tf.constant(diag_mask[None, None].astype(np.float32))
+        self.Dexp = tf.exp(self.D)
+        # LD mult
+        ld = self._matmul_modstate(self.L, self.D)
+        # LDL.T mult
+        L_trans = tf.transpose(self.L, perm=[2, 3])
+        # --> 1 x num_model x num_state x d x d
+        self.LDL = tf.expand_dims(self._matmul_modstate(ld, L_trans), 0)
+    
+    def _matmul_modstate(self, x1, x2):
+        # matmul where x1, x2 = [num_model, num_state, d, d]
+        return tf.reduce_sum(tf.expand_dims(x1, 4) * tf.expand_dims(x2, 2), axis=3)
+
+    def calc_log_prob(self, x):
+        """Calculate log probability
+
+        Args:
+            x (_type_): input
+                batch_size x d
+
+        Returns:
+            _type_: log probabilities for each batch sample, model, and state
+                batch_size x num_model x num_state
+        """
+        # double expand x --> batch_size x 1 x 1 x d
+        x = tf.expand_dims(x, 1)
+        x = tf.expand_dims(x, 1)
+        # diff from mean --> batch_size x num_model x num_state x d
+        di = x - tf.expand_dims(self.mu, 0)
+        # right mult: prec * di --> batch_size x num_model x num_state x d
+        rmul = tf.reduce_sum(self.LDL * tf.expand_dims(di, 4), axis=3)
+        # exponential term:
+        exp_term = -.5 * tf.reduce_sum(rmul, di, axis=3)
+
+        # denom term:
+        # log sqrt[ (2pi) ^ k * cov_det]
+        # = log sqrt [ (2pi) ^ k * prod(1/D_i ...) ]
+        # = .5 * log (2pi) ^ k * prod(...)
+        # = .5 * [k log 2pi + sum_i log 1/D_i]
+        # and D_i = exp(vi) --> log 1/D_i = -vi
+        # --> denom term = .5 * [k log 2pi - sum(vi)]
+        denom_term = .5 * (self.dim * np.log(2. * np.pi) - tf.reduce_sum(self.D))
+
+        return exp_term - denom_term
+
+        

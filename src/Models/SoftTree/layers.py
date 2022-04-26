@@ -43,11 +43,6 @@ class LayerIface(abc.ABC):
         """
         pass
 
-    def l2(self):
-        """L2 calculation
-        """
-        pass
-
     def get_width(self):
         """Report the width"""
         pass
@@ -60,7 +55,8 @@ class LayerBasic(LayerIface):
                  num_models: int,
                  xshape: List[int],
                  width: int,
-                 rng: npr.Generator):
+                 rng: npr.Generator,
+                 shared_component: bool = False):
         """Initialize a basic layer
 
         Args:
@@ -69,11 +65,18 @@ class LayerBasic(LayerIface):
                 doesn't include parallel models or batch_size
             width (int): number of outputs from the layer
             rng (npr.Generator): numpy random generator
+            shared_component (bool): if set to True -->
+                layer_i = core_layer + layer_offset_i
         """
         self.rng = rng
         self.width = width
         # coefficients
-        self.w = var_construct(rng, [num_models, width] + xshape)
+        if shared_component:
+            core_layer = var_construct(rng, [1, width] + xshape)
+            off_layer = var_construct(rng, [num_models, width] + xshape)
+            self.w = core_layer + off_layer
+        else:
+            self.w = var_construct(rng, [num_models, width] + xshape)
         self.wop = tf.expand_dims(self.w, 0)
         # offsets
         self.offset = var_construct(rng, [num_models, width])
@@ -97,13 +100,6 @@ class LayerBasic(LayerIface):
         x = tf.expand_dims(x, 1)
         return self.offset + tf.math.reduce_sum(x * self.wop,
                                                 axis=self.reduce_dims)
-
-    def l2(self):
-        """L2 calculation
-        currently does an averaging out of lazyness
-        """
-        return tf.math.reduce_mean(tf.pow(self.wop, 2),
-                                   axis=[0] + self.reduce_dims)
     
     def get_width(self):
         return self.width
@@ -120,7 +116,8 @@ class LayerLowRankFB(LayerIface):
                  xshape: List[int],
                  width: int,
                  low_dim: int,
-                 rng: npr.Generator):
+                 rng: npr.Generator,
+                 shared_component: bool = False):
         """Initialize a low rank, FilterBank (FB) layer
 
         Args:
@@ -131,13 +128,21 @@ class LayerLowRankFB(LayerIface):
             low_dim (int): limiting dimension
                 filter bank = low_dim x xshape (other dims)
             rng (npr.Generator): numpy random generator
+            shared_component (bool): if set to True -->
+                layer_i = core_layer + layer_offset_i
         """
         self.rng = rng
         self.width = width
         # coefficients
         # NOTE: scales up coeffs to make up for squaring
+        # filterbank shared either way
         self.fb = var_construct(rng, [low_dim] + xshape, 2.)
-        self.wb = var_construct(rng, [num_models, width, low_dim] + xshape, 2.)
+        if shared_component:
+            wb_core = var_construct(rng, [1, width, low_dim] + xshape, 2.)
+            wb_off = var_construct(rng, [num_models, width, low_dim] + xshape, 2.)
+            self.wb = wb_core + wb_off
+        else:
+            self.wb = var_construct(rng, [num_models, width, low_dim] + xshape, 2.)
         # --> num_models x width x low_dim x xshape
         wbig = (tf.reshape(self.fb, [1, 1, low_dim] + xshape) *
                     tf.reshape(self.wb, [num_models, width, low_dim] + xshape))
@@ -167,14 +172,6 @@ class LayerLowRankFB(LayerIface):
         # add dims for parallel models and width
         return self.offset + tf.math.reduce_sum(x * self.wop,
                                                 axis=self.reduce_dims)
-
-    def l2(self):
-        """L2 calculation
-        currently does an averaging out of lazyness
-        """
-        # does l2 calc in the outer product space
-        return tf.math.reduce_mean(tf.pow(self.wop, 2),
-                                   axis=[0] + self.reduce_dims)
 
     def get_width(self):
         return self.width
