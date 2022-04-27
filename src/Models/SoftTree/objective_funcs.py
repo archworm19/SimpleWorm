@@ -98,11 +98,11 @@ class GaussFull(log_prob_iface):
         tril_mask = base_tril_mask * (1 - diag_mask)
         L_base = var_construct(rng, [num_model, num_state, dim, dim])
         D_base = var_construct(rng, [num_model, num_state, dim, dim])
-        tf_diag_mask = tf.constant(diag_mask[None, None].astype(np.float32))
+        self.tf_diag_mask = tf.constant(diag_mask[None, None].astype(np.float32))
         # --> num_model x num_state x dim x dim; and each dim x dim matrix is LD constructed
-        self.L = L_base * tf.constant(tril_mask[None, None].astype(np.float32)) + tf_diag_mask
+        self.L = L_base * tf.constant(tril_mask[None, None].astype(np.float32)) + self.tf_diag_mask
         self.D = D_base
-        self.Dexp = tf.exp(self.D) * tf_diag_mask  # constrain positive and set off diags 0
+        self.Dexp = tf.exp(self.D) * self.tf_diag_mask  # constrain positive and set off diags 0
         # LD mult
         ld = self._matmul_modstate(self.L, self.Dexp)
         # LDL.T mult
@@ -133,15 +133,17 @@ class GaussFull(log_prob_iface):
         # right mult: prec * di --> batch_size x num_model x num_state x d
         rmul = tf.reduce_sum(self.LDL * tf.expand_dims(di, 4), axis=3)
         # exponential term:
-        exp_term = -.5 * tf.reduce_sum(rmul, di, axis=3)
+        exp_term = -.5 * tf.reduce_sum(rmul * di, axis=3)
 
         # denom term:
         # log sqrt[ (2pi) ^ k * cov_det]
-        # = log sqrt [ (2pi) ^ k * prod(1/D_i ...) ]
-        # = .5 * log (2pi) ^ k * prod(...)
-        # = .5 * [k log 2pi + sum_i log 1/D_i]
-        # and D_i = exp(vi) --> log 1/D_i = -vi
-        # --> denom term = .5 * [k log 2pi - sum(vi)]
-        denom_term = .5 * (self.dim * np.log(2. * np.pi) - tf.reduce_sum(self.D))
+        # = log sqrt[ (2pi) ^ k * 1. / det(precision) ]
+        # = .5 * log [ (2pi) ^ k ] + .5 * log [1 / det(precision)]
+        # = .5k * log 2pi - .5 * log det(precision)
+        # = .5k * log 2pi - .5 * log prod Dexp (diagonal)
+        # = .5k * log 2pi - .5 * sum_i log exp(D_i)
+        # = .5k * log 2pi - .5 * sum_i D_i
+        denom_term = .5 * (self.dim * np.log(2. * np.pi) -
+                           tf.reduce_sum(self.D * self.tf_diag_mask, axis=[2,3]))
 
-        return exp_term - denom_term
+        return exp_term - tf.expand_dims(denom_term, 0)

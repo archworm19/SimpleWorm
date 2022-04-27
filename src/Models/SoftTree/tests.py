@@ -7,6 +7,8 @@ import tensorflow as tf
 import numpy as np
 import numpy.random as npr
 import numpy.linalg as npla
+from scipy.stats import multivariate_normal as m_normal
+
 
 def test_layers():
     rng = npr.default_rng(42)
@@ -121,9 +123,10 @@ def test_gauss():
     dim = 5
     GF = objective_funcs.GaussFull(num_model, num_state, dim, rng)
     # testing of built constructs
+    munp = GF.mu.numpy()
     Lnp = GF.L.numpy()
     Dnp = GF.Dexp.numpy()
-    LDLnp = GF.LDL.numpy()
+    LDLnp = GF.LDL.numpy()  # precision matrix
     assert(np.shape(Lnp) == (num_model, num_state, dim, dim))
     assert(np.shape(Dnp) == (num_model, num_state, dim, dim))
     assert(np.shape(LDLnp) == (1, num_model, num_state, dim, dim))  # pad for batch
@@ -142,8 +145,19 @@ def test_gauss():
             # determinant: prod of eigenvals = prod of diag(Dnp)
             assert((npla.det(LDLnp[0,i,j]) - np.prod(np.diag(Dnp[i,j]))) < tolerance)
 
-    
-
+    # log probability simple tests:
+    batch_size = 6
+    xnp = rng.random((batch_size, dim)).astype(np.float32)
+    x = tf.constant(xnp)
+    log_prob = GF.calc_log_prob(x)
+    lpnp = log_prob.numpy()
+    assert(np.shape(log_prob.numpy()) == (batch_size, num_model, num_state))
+    #print(log_prob)
+    tolerance = 1e-4  # there's gonna be some error in this computation
+    for i in range(num_model):
+        for j in range(num_state):
+            prob = m_normal.pdf(xnp, mean=munp[i,j], cov=npla.pinv(LDLnp[0,i,j]))
+            assert(np.sum(lpnp[:,i,j] - np.log(prob)) < tolerance)
 
 
 if __name__ == '__main__':
