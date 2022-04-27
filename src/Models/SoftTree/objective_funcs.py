@@ -92,21 +92,21 @@ class GaussFull(log_prob_iface):
         """
         self.dim = dim
         self.mu = var_construct(rng, [num_model, num_state, dim])
-
         # precision construction
         diag_mask = np.diag(np.ones((dim,)))
         base_tril_mask = np.tril(np.ones((dim,)))
-        tril_mask = base_tril_mask * (1 - diag_mask) + diag_mask
+        tril_mask = base_tril_mask * (1 - diag_mask)
         L_base = var_construct(rng, [num_model, num_state, dim, dim])
         D_base = var_construct(rng, [num_model, num_state, dim, dim])
+        tf_diag_mask = tf.constant(diag_mask[None, None].astype(np.float32))
         # --> num_model x num_state x dim x dim; and each dim x dim matrix is LD constructed
-        self.L = L_base * tf.constant(tril_mask[None, None].astype(np.float32))
-        self.D = D_base * tf.constant(diag_mask[None, None].astype(np.float32))
-        self.Dexp = tf.exp(self.D)
+        self.L = L_base * tf.constant(tril_mask[None, None].astype(np.float32)) + tf_diag_mask
+        self.D = D_base
+        self.Dexp = tf.exp(self.D) * tf_diag_mask  # constrain positive and set off diags 0
         # LD mult
-        ld = self._matmul_modstate(self.L, self.D)
+        ld = self._matmul_modstate(self.L, self.Dexp)
         # LDL.T mult
-        L_trans = tf.transpose(self.L, perm=[2, 3])
+        L_trans = tf.transpose(self.L, perm=[0, 1, 3, 2])
         # --> 1 x num_model x num_state x d x d
         self.LDL = tf.expand_dims(self._matmul_modstate(ld, L_trans), 0)
     
@@ -145,5 +145,3 @@ class GaussFull(log_prob_iface):
         denom_term = .5 * (self.dim * np.log(2. * np.pi) - tf.reduce_sum(self.D))
 
         return exp_term - denom_term
-
-        

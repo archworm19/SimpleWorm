@@ -1,11 +1,12 @@
 """Testing forest components"""
-from turtle import width
 from typing import List
 from Models.SoftTree import layers
 from Models.SoftTree import forest
+from Models.SoftTree import objective_funcs
 import tensorflow as tf
 import numpy as np
 import numpy.random as npr
+import numpy.linalg as npla
 
 def test_layers():
     rng = npr.default_rng(42)
@@ -52,7 +53,7 @@ def _build_forest():
     xshape = [12]
     width = 2  # means layer --> 2 (3 children per parent)
     low_dim = 4
-    rng = npr.default_rng()
+    rng = npr.default_rng(42)
     LFLR = layers.LayerFactoryLowRankFB(num_models, xshape, width, low_dim, rng)
     F = forest.build_forest(depth, LFLR)
     return F, LFLR, depth
@@ -108,9 +109,40 @@ def test_eval_forest():
         assert(np.sum(prs[i] - prs[0]) < .00001)
 
     # HI check --> full offset dim should disapear
-    x = tf.ones([batch_size, dims]) * 100000
+    x = tf.ones([batch_size, dims]) * 1000000
     prs = F.eval(x).numpy()
     assert(np.sum(prs[:,:,-1]) < .01)
+
+
+def test_gauss():
+    rng = npr.default_rng(42)
+    num_model = 3
+    num_state = 4
+    dim = 5
+    GF = objective_funcs.GaussFull(num_model, num_state, dim, rng)
+    # testing of built constructs
+    Lnp = GF.L.numpy()
+    Dnp = GF.Dexp.numpy()
+    LDLnp = GF.LDL.numpy()
+    assert(np.shape(Lnp) == (num_model, num_state, dim, dim))
+    assert(np.shape(Dnp) == (num_model, num_state, dim, dim))
+    assert(np.shape(LDLnp) == (1, num_model, num_state, dim, dim))  # pad for batch
+    tolerance = 1e-6
+    for i in range(num_model):
+        for j in range(num_state):
+            ## L
+            assert(np.sum(np.diag(Lnp[i,j]) - 1.) < tolerance)
+            assert(np.sum(Lnp[i,j] - np.tril(Lnp[i,j])) < tolerance)
+            ## D
+            assert(np.sum(Dnp[i,j] - np.tril(Dnp[i,j])) < tolerance)
+            assert(np.sum(Dnp[i,j] - np.triu(Dnp[i,j])) < tolerance)
+            ## LDL
+            # symmetry
+            assert(np.sum(LDLnp[0,i,j] - LDLnp[0,i,j].T) < tolerance)
+            # determinant: prod of eigenvals = prod of diag(Dnp)
+            assert((npla.det(LDLnp[0,i,j]) - np.prod(np.diag(Dnp[i,j]))) < tolerance)
+
+    
 
 
 
@@ -118,3 +150,4 @@ if __name__ == '__main__':
     test_layers()
     test_forest_build()
     test_eval_forest()
+    test_gauss()
