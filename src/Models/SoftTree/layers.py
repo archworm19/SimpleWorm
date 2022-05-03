@@ -49,6 +49,97 @@ class LayerIface(abc.ABC):
 
 
 
+# TODO: new LayerBasic
+# should replace OG LayerBasic 
+class LayerBasic2(LayerIface):
+    """Key: shared and spread components
+    > N shared components and M spread components per shared comp
+    > For each shared component --> there is a model group
+        --> weights for model group = w_shared (single) + w_spread
+            = M spread components"""
+
+    def __init__(self,
+                 base_models: int,
+                 models_per_base: int,
+                 xshape: List[int],
+                 width: int,
+                 rng: npr.Generator):
+        """Initialize a basic layer
+        > total num_models = base_models * models_per_base
+        > special case: base_models = 0 --> there are
+            [models_per_base] independent models
+
+        Args:
+            num_models (int): number of base models
+            models_per_base (int): number of models per
+                each base model. These models all share a
+                common component
+            xshape (List[int]): shape of extra dimensions
+                doesn't include parallel models or batch_size
+            width (int): number of outputs from the layer
+            rng (npr.Generator): numpy random generator
+            shared_component (bool): if set to True -->
+                layer_i = core_layer + layer_offset_i
+        """
+        assert(base_models >= 0), "positive base models number"
+        assert(models_per_base > 0), "models per base 1 or more"
+        self.rng = rng
+        self.width = width
+        # coefficients
+        if base_models > 0:
+            self.shared_comps = var_construct(rng, [base_models, 1, width] + xshape)
+        else:
+            self.shared_comps = 0
+        # SPREAD component = base_models x models_per_base x width
+        self.spread_comps = var_construct(rng, [base_models, models_per_base, width] + xshape)
+        # --> base_models x models_per_base x ...
+        raw_w = self.shared_comps + self.spread_comps
+        # --> num_model x ...
+        self.w = tf.reshape(raw_w, [base_models * models_per_base, width] + xshape)
+        # add dim for batch
+        self.wop = tf.expand_dims(self.w, 0)
+        # offsets
+        self.offset = var_construct(rng, [base_models * models_per_base, width])
+        # first 3 dims are batch_size, parallel models, width
+        # --> should not be reduced
+        self.reduce_dims = [3 + i for i in range(len(xshape))]
+
+    def eval(self, x):
+        """Basic evaluation
+
+        Args:
+            x (TODO): input tensor
+                batches x ...
+        
+        Returns:
+            TODO/TYPE: reduced tensor
+                batches x parallel models x width
+        """
+        # add dims for parallel models and width
+        x = tf.expand_dims(x, 1)
+        x = tf.expand_dims(x, 1)
+        return self.offset + tf.math.reduce_sum(x * self.wop,
+                                                axis=self.reduce_dims)
+    
+    def get_width(self):
+        return self.width
+
+    # TODO: there should probably be a separate interface for this
+    # TODO: maybe a better name too
+    def spread_error(self):
+        """Calculate the spread error for the layer
+        > Spread Error = defined for a given model group (base component + sub_models)
+            = L2 norm of each spread component
+        > Where w for model set = w_shared (single shared component)
+                                 + w_spread (components for each model in the group)
+        
+        Returns:
+            _type_: L1 norm summed across all spread components
+                scalar
+        """
+        return tf.reduce_sum(tf.abs(self.spread_comps))
+
+
 class LayerBasic(LayerIface):
 
     def __init__(self,
