@@ -13,34 +13,47 @@ from scipy.stats import multivariate_normal as m_normal
 def test_layers():
     rng = npr.default_rng(42)
 
-    num_models = 12
+    num_base_model = 3
+    models_per_base = 4
     batch_size = 2
     xshape = [4, 5]
     width = 3
     x = tf.ones([batch_size] + xshape)
-    LFB = layers.LayerFactoryBasic(num_models, xshape, width, rng)
+    LFB = layers.LayerFactoryBasic(num_base_model, models_per_base, xshape, width, rng)
     layer1 = LFB.build_layer()
     layer2 = LFB.build_layer()
 
     # ensure layers are not identical == factory (not clone)
     assert(np.sum(layer1.eval(x).numpy() != layer2.eval(x).numpy()) >= 1)
     assert(np.shape(layer1.eval(x).numpy()) == (2, 12, 3))
-    assert(np.shape(layer1.w.numpy()) == tuple([num_models, width] + xshape))
-    assert(np.shape(layer1.wop.numpy()) == tuple([1, num_models, width] + xshape))
+    assert(np.shape(layer1.w.numpy()) == tuple([num_base_model * models_per_base, width] + xshape))
+    assert(np.shape(layer1.wop.numpy()) == tuple([1, num_base_model * models_per_base, width] + xshape))
     assert(np.shape(layer1.offset.numpy()) == (12, 3))
     # first 3 = batch_size, num_model, width (reduce across xshape)
     assert(layer1.reduce_dims == [3, 4])
     
     # low rank layers
     low_dim = 2
-    LFLR = layers.LayerFactoryLowRankFB(num_models, xshape, width, low_dim, rng)
+    LFLR = layers.LayerFactoryFB(num_base_model, models_per_base, xshape, width, low_dim, rng)
     layer3 = LFLR.build_layer()
     layer4 = LFLR.build_layer()
     assert(np.sum(layer3.eval(x).numpy() != layer4.eval(x).numpy()) >= 1)
     assert(np.shape(layer3.eval(x).numpy()) == (2, 12, 3))
-    assert(np.shape(layer3.w.numpy()) == tuple([num_models, width] + xshape))
-    assert(np.shape(layer3.fb.numpy()) == tuple([low_dim] + xshape))
-    assert(np.shape(layer3.wb.numpy()) == tuple([num_models, width, low_dim] + xshape))
+    assert(np.shape(layer3.w.numpy()) == tuple([num_base_model * models_per_base, width] + xshape))
+    assert(np.shape(layer3.fb.numpy()) == tuple([num_base_model, 1, 1, low_dim] + xshape))
+    assert(np.shape(layer3.w_shared.numpy()) == tuple([num_base_model, 1, width, low_dim]
+                                                        + [1 for _ in xshape]))
+    assert(np.shape(layer3.w_spread.numpy()) == tuple([num_base_model, models_per_base, width, low_dim]
+                                                        + [1 for _ in xshape]))
+
+    # test that parallel model flattening is done correctly:
+    # raw_w = base_models x models_per_base x width x xdims
+    # while w = base_models * models_per_base x width x xdims
+    for i in range(num_base_model):
+        for j in range(models_per_base):
+            raw_np = layer4.raw_w[i,j].numpy()
+            w_np = layer4.w[i*models_per_base + j].numpy()
+            assert(np.sum(raw_np - w_np) < .00001)
 
 
 def _get_layer_ws(node: forest.ForestNode, w_list: List):
@@ -51,12 +64,13 @@ def _get_layer_ws(node: forest.ForestNode, w_list: List):
 
 def _build_forest():
     depth = 3  # 3 levels (2 levels with children)
-    num_models = 15
+    num_base_models = 3
+    models_per_base = 5
     xshape = [12]
     width = 2  # means layer --> 2 (3 children per parent)
     low_dim = 4
     rng = npr.default_rng(42)
-    LFLR = layers.LayerFactoryLowRankFB(num_models, xshape, width, low_dim, rng)
+    LFLR = layers.LayerFactoryFB(num_base_models, models_per_base, xshape, width, low_dim, rng)
     F = forest.build_forest(depth, LFLR)
     return F, LFLR, depth
 
