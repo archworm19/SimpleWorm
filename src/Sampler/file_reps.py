@@ -6,6 +6,7 @@
     ... could easily be an interface
 
 """
+import abc
 import dataclasses
 from typing import List
 import numpy as np
@@ -15,24 +16,15 @@ import numpy.random as npr
 # TODO: how to make this work for TFrecords???
 
 
-# NOTE: should maybe just be a generic SingleFile
-# --> this would be a single version of it... easy fix if needed
-@dataclasses.dataclass
-class SingleFile:
-    """Assumed shapes
-    t_file: T x d1 x d2 x ...
-    id_file: T x M
-        T = number of time points
-    """
-    idn: int
-    t_file_name: str  # file name for time data
-    id_file_name: str  # file name for id data
-    t0_sample_file_name: str  # file name for t0 samples
-    t_file_shape: List[int]  # shape of numpy array in memmap file
-    id_file_shape: List[int]  # ""
-    t0_file_shape: List[int]  # number of t0s sampled for the current file
-    dtypes: str
-    t0_sample_dtype: str
+
+class FileWrapper(abc.ABC):
+    """Wraps a single file
+    Allows other set operations to be agnostic towards
+    file type"""
+    def clone(self):
+        """copy file info into new object
+        Underlying data is NOT copied (shallow)"""
+        pass
 
 
 @dataclasses.dataclass
