@@ -13,9 +13,10 @@
   > > > > Dict: mapping from tensor name to tensor dtype
 
 """
+import os.path
 import numpy as np
 import tensorflow as tf
-from typing import Dict
+from typing import List, Dict
 
 def write_numpy_to_tfr(file_name: str, np_map: Dict[str, np.ndarray]):
     """Write numpy tensors to tfrecords file
@@ -27,6 +28,9 @@ def write_numpy_to_tfr(file_name: str, np_map: Dict[str, np.ndarray]):
           Assumes: every tensor is organized such that the 0
             axis is the sampling axis (typically, different timepoints)
     """
+    # assert that filename does not exist
+    assert(not os.path.exists(file_name)), "file already exists"
+
     # check that all tensors are the same length:
     Ts = [np.shape(np_map[k])[0] for k in np_map]
     assert(all([Tsi == Ts[0] for Tsi in Ts]))
@@ -50,24 +54,25 @@ def write_numpy_to_tfr(file_name: str, np_map: Dict[str, np.ndarray]):
             file_writer.write(ex.SerializeToString())
 
 
-if __name__ == "__main__":
-    import numpy.random as npr
-    # TODO/TESTING:
-    file_name = 'sample.tfr'
-    np_map = {"x": npr.rand(10,5,2),
-              "y": npr.rand(10, 8)}
-    dtype_map = {k: np_map[k].dtype for k in np_map}
+def open_tfr(file_names: List[str], dtype_map: Dict):
+    """Open tf records files --> convert to tfrecords dataset
 
-    # write samples to sample.tfr
-    write_numpy_to_tfr(file_name, np_map)
-    
-    # TODO: everything below here should be packaged into a function
+    Args:
+        file_names (List[str]): list of filenames.
+            Every file is assumed to use the same data schema.
+        dtype_map (Dict): mapping from variable names to variable dtypes.
+            variable names assumed to match variable names
+            used in saving the tfrecords files (the keys in np_map)
 
-    # load the tfrecords
-    tfr_dset = tf.data.TFRecordDataset(file_name)
-
+    Returns:
+        tf.MapDataset: the dataset made up of tf tensors
+    """
     # make the parse mapping:
-    parse_dict = {k: tf.io.FixedLenFeature([], tf.string) for k in np_map}
+    parse_dict = {k: tf.io.FixedLenFeature([], tf.string) for k in dtype_map}
+
+    # open the datasets:
+    tfr_dset = tf.data.TFRecordDataset(file_names)
+
     def parse_elem(elem):
         ex_message = tf.io.parse_single_example(elem, parse_dict)
         feats = [tf.io.parse_tensor(ex_message[k], out_type=dtype_map[k]) for k in parse_dict]
@@ -75,5 +80,28 @@ if __name__ == "__main__":
 
     # use map to get dataset:
     dataset = tfr_dset.map(parse_elem)
-    for v in dataset:
-        print(v)
+    return dataset
+
+
+if __name__ == "__main__":
+    import numpy.random as npr
+    # TODO/TESTING:
+    file_name = 'sample.tfr'
+    file_name2 = 'sample2.tfr'
+    np_map = {"x": npr.rand(10,5,2),
+              "y": npr.rand(10, 8)}
+    dtype_map = {k: np_map[k].dtype for k in np_map}
+
+    # write samples to sample.tfr
+    write_numpy_to_tfr(file_name, np_map)
+    write_numpy_to_tfr(file_name2, np_map)
+
+    # load up the datasets:
+    dataset = open_tfr([file_name, file_name2], dtype_map)
+    for i, (x, y) in enumerate(dataset):
+        print('sample{0}'.format(str(i)))
+        print(x.shape)
+        print(y.shape)
+
+    # can we shuffle the dataset? yup ~ can do all normal ops
+    dataset.shuffle(1)
