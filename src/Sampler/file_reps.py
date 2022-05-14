@@ -12,6 +12,9 @@ import numpy as np
 import numpy.random as npr
 
 
+# TODO: how to make this work for TFrecords???
+
+
 # NOTE: should maybe just be a generic SingleFile
 # --> this would be a single version of it... easy fix if needed
 @dataclasses.dataclass
