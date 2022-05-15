@@ -4,8 +4,9 @@
     > drawer"""
 import numpy as np
 import numpy.random as npr
-from Sampler import file_sets, file_reps_np
+from Sampler import file_sets, file_reps_np, file_reps_tf
 from Sampler import set_sampling
+from Sampler.utils.tfrecords_utils import write_numpy_to_tfr, convert_tfdset_numpy
 
 
 def _make_fake_tree():
@@ -81,7 +82,9 @@ def test_sample_exe():
     assert(exp_idns.issubset(f_idns) and exp_idns.issuperset(f_idns))
 
 
-def _make_fake_files(t0_sub: bool = False):
+def _make_fake_files(t0_sub: bool = False,
+                        tf_mode: bool = False):
+    # tf_mode --> files are tensorflow records
     # make a single set with 3 animals
     tar0 = np.zeros((20, 8, 3))
     tar1 = np.ones((10, 8, 3))
@@ -102,15 +105,25 @@ def _make_fake_files(t0_sub: bool = False):
     t0z = [t00, t01, t02]
     filez = []
     file_root = 'TEMP'
-    for i in range(len(tz)):
-        filez.append(file_reps_np.save_file(i, file_root + str(i), 
-                                         tz[i], idz[i], t0z[i]))
+    if tf_mode:
+        # create tensorflow-backed file wrappers
+        for i in range(len(tz)):
+            np_map = {"t": tz[i],
+                "id": idz[i]}
+            dtype_map = {k: np_map[k].dtype for k in np_map}
+            fn = file_root + str(i) + '.tfr'
+            write_numpy_to_tfr(fn, np_map)
+            filez.append(file_reps_tf.FileWrapperTF(fn, dtype_map, None))
+    else:
+        for i in range(len(tz)):
+            filez.append(file_reps_np.save_file(i, file_root + str(i), 
+                                            tz[i], idz[i], t0z[i]))
     # package into single set:
     return file_sets.FileSet([], filez)
 
 
-def test_animal_sampler():
-    root = _make_fake_files()
+def test_animal_sampler(tf_mode: bool = False):
+    root = _make_fake_files(tf_mode=tf_mode)
     rng = npr.default_rng(42)
     set1, set2 = set_sampling.get_anml_sample_switch(root, .667, 4, 2, 1, rng)
     f1 = file_sets.get_files(set1)
@@ -119,7 +132,7 @@ def test_animal_sampler():
                   np.array([1, 2, 3, 9]), 
                   np.array([5, 6, 7, 13, 14, 15])]
     for f, targ_f in zip(f1 + f2, target_t0s):
-        _, _, t0s = f.open_file()
+        t0s = f.get_samples()
         assert(np.sum(t0s != targ_f) < 1)
     
 
@@ -158,5 +171,6 @@ if __name__ == '__main__':
     test_depth()
     test_idx_mapping()
     test_sample_exe()
-    test_animal_sampler()
+    test_animal_sampler(tf_mode=False)
+    test_animal_sampler(tf_mode=True)
     test_double_sample()

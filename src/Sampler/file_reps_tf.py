@@ -1,9 +1,9 @@
 """Tensorflow file representations ~ implement FileWrapper interface for tf"""
 import numpy as np
-import tensorflow as tf
-from typing import List, Dict, Tuple
+from typing import Dict, Tuple
 from Sampler.file_sets import FileWrapper
 from Sampler.utils.tfrecords_utils import open_tfr, convert_tfdset_numpy
+
 
 class FileWrapperTF(FileWrapper):
 
@@ -29,7 +29,7 @@ class FileWrapperTF(FileWrapper):
         self.T = len(v)
         if sample_inds is None:
             # set all t0s to useable
-            self.t0_inds = np.arange(v)
+            self.t0_inds = np.arange(self.T)
         else:
             self.t0_inds = sample_inds
 
@@ -85,3 +85,13 @@ class FileWrapperTF(FileWrapper):
         # convert to numpy:
         np_dset = convert_tfdset_numpy(dset, target_tensor)
         return np.any(np.isnan(np_dset[locations]))
+
+    def open_file(self):
+        """Open the file --> get the tf dataset
+        NOTE: this is NOT part of FileWrapper interface
+            cuz highly dependent on the backend
+
+        Returns:
+            tensorflow dataset
+        """
+        return open_tfr([self.file_name], self.dtype_map)
