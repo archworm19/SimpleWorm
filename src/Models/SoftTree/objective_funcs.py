@@ -119,7 +119,7 @@ class GaussFull(log_prob_iface):
 
         Args:
             x (_type_): input
-                batch_size x d
+                batch_size x d (dim of gaussian domain)
 
         Returns:
             _type_: log probabilities for each batch sample, model, and state

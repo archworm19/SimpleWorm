@@ -3,7 +3,6 @@
 
     Factories that generate layers
 """
-from email.mime import base
 from typing import List
 import abc
 import numpy as np
@@ -181,16 +180,18 @@ class LayerFB(LayerIface):
         # dims overall = (base_models, models_per_base, width, fb_dim, ... xdims ...)
         if base_models > 0:
             self.fb = var_construct(rng, [base_models, 1, 1, fb_dim] + xshape)
-            self.w_shared = var_construct(rng, [base_models, 1, width, fb_dim])
+            self.w_shared = var_construct(rng, [base_models, 1, width, fb_dim]
+                                                + [1 for _ in xshape])
         else:
             self.w_shared = 0
         # SPREAD component
-        self.w_spread = var_construct(rng, [base_models, models_per_base, width, fb_dim])
+        self.w_spread = var_construct(rng, [base_models, models_per_base, width, fb_dim]
+                                             + [1 for _ in xshape])
         # raw_r = fb w_shared + fb w_spread
         # --> base_models x models_per_base x width x xdims
-        raw_w = tf.reduce_sum(self.fb * self.w_shared + self.fb * self.w_spread, axis=3)
+        self.raw_w = tf.reduce_sum(self.fb * self.w_shared + self.fb * self.w_spread, axis=3)
         # --> num_model x ...
-        self.w = tf.reshape(raw_w, [base_models * models_per_base, width] + xshape)
+        self.w = tf.reshape(self.raw_w, [base_models * models_per_base, width] + xshape)
         # add dim for batch
         self.wop = tf.expand_dims(self.w, 0)
         # offsets
@@ -238,6 +239,34 @@ class LayerFB(LayerIface):
         return tf.reduce_sum(tf.abs(sp_xdim))
 
 
+class LayerMulti(LayerIface):
+    """A layer composed of multiple sub-layers
+        Will ADD together outputs of layers for all methods"""
+
+    def __init__(self, sub_layers: List[LayerIface]):
+        """Compose the multi-layer
+        > sub_layers must have the same width
+
+        Args:
+            sub_layers (List[LayerIface]):
+        """
+        self.sub_layers = sub_layers
+        self.width = sub_layers[0].get_width()
+        for sl in sub_layers:
+            assert(sl.get_width() == self.width)
+
+    def get_width(self):
+        return self.width
+    
+    def eval(self, x):
+        evs = [sl.eval(x) for sl in self.sub_layers]
+        return tf.add_n(evs)
+    
+    def spread_error(self):
+        serr = [sl.spread_error() for sl in self.sub_layers]
+        return tf.add_n(serr)
+
+
 # layer factories
 
 
@@ -259,25 +288,90 @@ class LayerFactoryIface(abc.ABC):
 class LayerFactoryBasic(LayerFactoryIface):
 
     def __init__(self,
-                 num_models: int,
+                 base_models: int,
+                 models_per_base: int,
                  xshape: List[int],
                  width: int,
                  rng: npr.Generator):
         """Build the factory (which will build layers)
 
         Args:
-            num_models (int): number of parallel models
+            base_models (int): number of base models / model groups
+            models_per_base (int): number of models (fit in parallel)
+                per each base model / model group
             xshape (List[int]): shape of input dims
             width (int): number of outputs for each model
             rng (npr.Generator): numpy random generator
         """
         self.rng = rng
-        self.num_models = num_models 
+        self.base_models = base_models
+        self.models_per_base = models_per_base
         self.xshape = xshape
         self.width = width
     
     def build_layer(self):
-        return LayerBasic(self.num_models, self.xshape, self.width, self.rng)
+        return LayerBasic(self.base_models, self.models_per_base, self.xshape, self.width, self.rng)
+    
+    def get_width(self):
+        return self.width
+    
+    def get_num_models(self):
+        return self.num_models
+
+
+class LayerFactoryFB(LayerFactoryIface):
+
+    def __init__(self,
+                 base_models: int,
+                 models_per_base: int,
+                 xshape: List[int],
+                 width: int,
+                 fb_dim: int,
+                 rng: npr.Generator):
+        """Build the factory (which will build layers)
+
+        Args:
+            base_models (int): number of base models / model groups
+            models_per_base (int): number of models (fit in parallel)
+                per each base model / model group
+            xshape (List[int]): shape of input dims
+            width (int): number of outputs for each model
+            fb_dim (int): number of filters in each filterbank
+                restricts dimensionality of layers
+            rng (npr.Generator): numpy random generator
+        """
+        self.rng = rng
+        self.base_models = base_models
+        self.models_per_base = models_per_base
+        self.xshape = xshape
+        self.width = width
+        self.fb_dim = fb_dim
+
+    def build_layer(self):
+        return LayerFB(self.base_models, self.models_per_base, self.xshape, self.width,
+                        self.fb_dim, self.rng)
+    
+    def get_width(self):
+        return self.width
+    
+    def get_num_models(self):
+        return self.num_models
+
+
+class LayerFactoryMulti(LayerFactoryIface):
+    """Multi layers are compsed of other layer types
+        --> add together their outputs for iface methods"""
+    def __init__(self, lfacts: List[LayerIface]):
+        self.lfacts = lfacts
+        self.width = self.lfacts[0].get_width()
+        self.num_models = self.lfacts[0].get_num_models()
+        for slf in self.lfacts:
+            assert(slf.get_width() == self.width)
+            assert(slf.get_num_models() == self.num_models)
+        
+    def build_layer(self):
+        raw_layers = [slf.build_layer() for slf in self.lfacts]
+        return LayerMulti(raw_layers)
     
     def get_width(self):
         return self.width
