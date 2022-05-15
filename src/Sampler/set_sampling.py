@@ -1,7 +1,7 @@
 """  
     Sampling strategies
 
-    Operate on file representations (file_reps.py)
+    Operate on file representations (file_sets.py)
 
     Design:
     > Everything operates on the tree
@@ -18,10 +18,10 @@
 
 """
 import abc
-from typing import List, Dict
+from typing import List, Dict, Tuple
 import numpy as np
 import numpy.random as npr
-from Sampler import file_reps
+from Sampler import file_sets
 
 
 # Execution
@@ -30,7 +30,7 @@ from Sampler import file_reps
 class SetSamplerStrat(abc.ABC):
     # Which subsets to sample
     def sample(self, set_path: List[int],
-               current_set: file_reps.FileSet):
+               current_set: file_sets.FileSet):
         # Returns: List[int] = indices of children to use
         pass
 
@@ -38,7 +38,7 @@ class SetSamplerStrat(abc.ABC):
 class FileSamplerStrat(abc.ABC):
     # which subfiles to sample
     def sample(self, set_path: List[int],
-               current_set: file_reps.FileSet):
+               current_set: file_sets.FileSet):
         # Returns: List[int] = indices of children to use
         pass
 
@@ -47,14 +47,14 @@ class t0SamplerStrat(abc.ABC):
     # select t0s from available
     def sample(self, set_path: List[int],
                file_idx: int,
-               target_file: file_reps.SingleFile):
+               target_file: file_sets.SingleFile):
         # returns: deepcopy of target file
         pass
 
 
 def exe_plan(set_path: List[int],
-             new_set: file_reps.FileSet,
-             cur_set: file_reps.FileSet,
+             new_set: file_sets.FileSet,
+             cur_set: file_sets.FileSet,
              set_strat: SetSamplerStrat,
              file_strat: FileSamplerStrat,
              t0_strat: t0SamplerStrat):
@@ -64,9 +64,9 @@ def exe_plan(set_path: List[int],
     Args:
         set_path (List[int]): sub-sets that have been visited
             length of list = how deep we are in set hierarchy
-        new_set (file_reps.FileSet): parent file_reps.FileSet;
+        new_set (file_sets.FileSet): parent file_sets.FileSet;
             we will insert selected children
-        cur_set (file_reps.FileSet): parent file_reps.Fileset;
+        cur_set (file_sets.FileSet): parent file_sets.Fileset;
             from which we are copying subsets
         set_strat (SetSamplerStrat): set sampling strategy
         file_strat (FileSamplerStrat): file sampling strategy
@@ -86,7 +86,7 @@ def exe_plan(set_path: List[int],
         # get available subsets:
         select_subset_inds = set_strat.sample(set_path, cur_set)
         for si in select_subset_inds:
-            new_sub = file_reps.FileSet([], [])
+            new_sub = file_sets.FileSet([], [])
             new_set.sub_sets.append(new_sub)
             exe_plan(set_path + [si], new_sub, cur_set.sub_sets[si],
                      set_strat, file_strat, t0_strat)
@@ -118,7 +118,7 @@ class LvlSplitter(SetSamplerStrat):
         self.split_level = split_level
         self.sample_map = sample_map
     
-    def sample(self, set_path: List[int], current_set: file_reps.FileSet):
+    def sample(self, set_path: List[int], current_set: file_sets.FileSet):
         if len(set_path) == self.split_level:
             return self.sample_map[str(set_path)]
         return [z for z in range(len(current_set.sub_sets))]
@@ -129,7 +129,7 @@ class LeafFileSplitter(FileSamplerStrat):
     def __init__(self, sample_map: Dict[str, List[int]]):
         self.sample_map = sample_map
     
-    def sample(self, set_path: List[int], current_set: file_reps.FileSet):
+    def sample(self, set_path: List[int], current_set: file_sets.FileSet):
         return self.sample_map[str(set_path)]
 
 
@@ -137,10 +137,12 @@ class LeafFileSplitter(FileSamplerStrat):
 
 
 class Allt0Strat(t0SamplerStrat):
+    """Get all t0s = clone operation"""
     def __init__(self):
         pass
-    def sample(self, set_path: List[int], file_idx: int, target_file: file_reps.SingleFile):
-        return file_reps.clone_single_file(target_file)
+
+    def sample(self, set_path: List[int], file_idx: int, target_file: file_sets.FileWrapper):
+        return target_file.clone()
 
 
 class Switchingt0Strat(t0SamplerStrat):
@@ -158,13 +160,10 @@ class Switchingt0Strat(t0SamplerStrat):
         self.block_size = block_size
         self.start_hi = start_hi
         self.offset = offset
-    
-    def _get_t0s(self, target_file: file_reps.SingleFile):
-        tz, _, init_t0s = file_reps.open_file(target_file)
-        return len(tz), init_t0s
-    
-    def sample(self, set_path: List[int], file_idx: int, target_file: file_reps.SingleFile):    
-        L, init_t0s = self._get_t0s(target_file)
+
+    def sample(self, set_path: List[int], file_idx: int, target_file: file_sets.FileWrapper):  
+        init_t0s = target_file.get_samples()
+        L = target_file.get_data_len()
         markz = np.zeros((L,))
         hbit = 1 * self.start_hi
         for i in range(self.offset, L, self.block_size):
@@ -175,20 +174,20 @@ class Switchingt0Strat(t0SamplerStrat):
         fmask[init_t0s] = 1
         markz = markz * fmask
         sel_t0s = np.where(markz)[0]
-        return file_reps.sample_file(target_file, sel_t0s)
+        return target_file.sample(sel_t0s)
 
 
 # Useful Strat Builders
 
 
-def build_comp_sets(root_set: file_reps.FileSet,
+def build_comp_sets(root_set: file_sets.FileSet,
                     split_level: int,
                     split_prob: float,
                     rng: npr.Generator):
     """Build complementary Subset sampling strategies
 
     Args:
-        root_set (file_reps.FileSet): root set
+        root_set (file_sets.FileSet): root set
         split_level (int): level in hierarchy at which to split
         split_prob (float): probability of subset being assign to
             primary set
@@ -200,7 +199,7 @@ def build_comp_sets(root_set: file_reps.FileSet,
     """
     # get all subsets at specified level
     # --> List[List[int]], List[int]
-    paths, num_sub = file_reps.get_num_sets_lvl(root_set, split_level)
+    paths, num_sub = file_sets.get_num_sets_lvl(root_set, split_level)
     # split into 2 complementary sets:
     sample_map, comp_map = {}, {}
     # allocate within each group:
@@ -211,14 +210,14 @@ def build_comp_sets(root_set: file_reps.FileSet,
     return LvlSplitter(split_level, sample_map), LvlSplitter(split_level, comp_map)
 
 
-def build_comp_files(root_set: file_reps.FileSet,
+def build_comp_files(root_set: file_sets.FileSet,
                      split_prob: float,
                      rng: npr.Generator):
     """Build complementary file sampling strategies
     > LeafSplitter = will ignore internal files
 
     Args:
-        root_set (file_reps.FileSet): root set
+        root_set (file_sets.FileSet): root set
         split_prob (float): probability of subset being assign to
             primary set
         rng (npr.Generator): 
@@ -228,7 +227,7 @@ def build_comp_files(root_set: file_reps.FileSet,
         LeafFileSplitter: strat 2
     """
     # --> List[List[int]], List[List[Files]]
-    paths, filez = file_reps.get_files_struct(root_set)
+    paths, filez = file_sets.get_files_struct(root_set)
     # split into 2 complementary sets:
     sample_map, comp_map = {}, {}
     # allocate within each group:
@@ -244,12 +243,12 @@ def build_comp_files(root_set: file_reps.FileSet,
 # > sample within subsets
 
 
-def _get_anml_sample(root_set: file_reps.FileSet,
+def _get_anml_sample(root_set: file_sets.FileSet,
                      t0_strat1: t0SamplerStrat,
                      t0_strat2: t0SamplerStrat,
                      anml_sample_prob: float,
                      rng: npr.Generator):
-    depths = file_reps.get_depths(root_set)
+    depths = file_sets.get_depths(root_set)
     for de in depths[1:]:
         assert(de == depths[0]), "all depths must be the same"
 
@@ -258,16 +257,16 @@ def _get_anml_sample(root_set: file_reps.FileSet,
     file_strat1, file_strat2 = build_comp_files(root_set, anml_sample_prob, rng)
 
     # primary set:
-    new_set1 = file_reps.FileSet([], [])
+    new_set1 = file_sets.FileSet([], [])
     exe_plan([], new_set1, root_set, set_strat, file_strat1, t0_strat1)
 
     # complementary set:
-    new_set2 = file_reps.FileSet([], [])
+    new_set2 = file_sets.FileSet([], [])
     exe_plan([], new_set2, root_set, set_strat, file_strat2, t0_strat2)
     return new_set1, new_set2
 
 
-def get_anml_sample_switch(root_set: file_reps.FileSet,
+def get_anml_sample_switch(root_set: file_sets.FileSet,
                            anml_sample_prob: float,
                            block_size: int,
                            twindow_size: int,
@@ -278,7 +277,7 @@ def get_anml_sample_switch(root_set: file_reps.FileSet,
     > Keeps all sets ~ samples animals within sets
 
     Args:
-        root_set (file_reps.FileSet): _description_
+        root_set (file_sets.FileSet): _description_
         anml_sample_prob (float): sample probability
             for a given animal within each set
         block_size (int): number of adjacent timewindows
@@ -287,9 +286,9 @@ def get_anml_sample_switch(root_set: file_reps.FileSet,
         offset (int): where to start t0 sampling
     
     Returns:
-        file_reps.FileSet: root of the deepcopy of the first 
+        file_sets.FileSet: root of the deepcopy of the first 
             subset of input set
-        file_reps.FileSet: root of the deepcopy of the complement
+        file_sets.FileSet: root of the deepcopy of the complement
             subset
     """
     t0_strat1 = Switchingt0Strat(twindow_size, block_size, True, offset)
@@ -297,7 +296,7 @@ def get_anml_sample_switch(root_set: file_reps.FileSet,
     return _get_anml_sample(root_set, t0_strat1, t0_strat2, anml_sample_prob, rng)
 
 
-def get_anml_sample_allt0(root_set: file_reps.FileSet,
+def get_anml_sample_allt0(root_set: file_sets.FileSet,
                           anml_sample_prob: float,
                           rng: npr.Generator):
     # get animal sample + take all t0s from selected files
@@ -306,46 +305,45 @@ def get_anml_sample_allt0(root_set: file_reps.FileSet,
                             anml_sample_prob, rng)
 
 
-def sample_avail_files(root_set: file_reps.FileSet,
-                       target_cell: int):
+def sample_avail_files(root_set: file_sets.FileSet,
+                       locations: Tuple[Tuple[int]]):
     """Sample available files
     'Available files' = files that have no nans
         for the target cell
-    ASSUMES: time series shape for files = T x N
-        where N = number of cells
 
     Args:
-        root_set (file_reps.FileSet):
-        target_cell (int): target cell that
-            must be defined for all timepoints
+        root_set (file_sets.FileSet):
+        locations (Tuple[Tuple[int]]): locations to search
+            specified in numpy indexing format = 
+            0th tuple for 0th axis, 1st tuple for 1st axis, etc.
     
     Returns:
-        file_reps.FileSet: root of deepcopy of
+        file_sets.FileSet: root of deepcopy of
             subset
+            deepcopy of annotation structure but
+            shallow of underlying data
     """
     # this class is internal as it's not generally useful
     class CFileSampler(FileSamplerStrat):
         # only select files at leaves; select no internal files 
-        def __init__(self, tcell):
-            self.target_cell = tcell
+        def __init__(self, locations):
+            self.locations = locations
         
         # Returns: List[int] = indices of children to use
-        def sample(self, set_path: List[int], current_set: file_reps.FileSet):
+        def sample(self, set_path: List[int], current_set: file_sets.FileSet):
             inds = []
             for i, fi in enumerate(current_set.files):
-                tdat, _, _ = file_reps.open_file(fi)
-                vnan = np.sum(np.isnan(tdat[:, self.target_cell]))
-                if vnan < 1:
+                if not fi.check_nan(self.locations):
                     inds.append(i)
             return inds
     
     # strats:
     # None --> never split; select all
     set_strat = LvlSplitter(None, {})
-    file_strat = CFileSampler(target_cell)
+    file_strat = CFileSampler(locations)
     t0_strat = Allt0Strat()
 
-    new_set = file_reps.FileSet([], [])
+    new_set = file_sets.FileSet([], [])
     exe_plan([], new_set, root_set,
              set_strat, file_strat, t0_strat)
     return new_set

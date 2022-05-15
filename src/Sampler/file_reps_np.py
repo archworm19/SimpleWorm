@@ -1,6 +1,6 @@
 """Numpy Memmap File Representations"""
 import numpy as np
-from typing import List
+from typing import List, Tuple
 from Sampler.file_sets import FileWrapper
 
 
@@ -88,6 +88,16 @@ class FileWrapperNP(FileWrapper):
             np.ndarray: indices of available sampels"""
         _, _, sample_inds = self.open_file()
         return sample_inds
+
+    def get_data_len(self):
+        # this is almost certainly not the most efficient system:
+        t_dat, _, _ = self.open_file()
+        return np.shape(t_dat)[0]
+    
+    def check_nan(self, locations: Tuple[Tuple[int]]):
+        # this is almost certainly not the most efficient system:
+        t_dat, _, _ = self.open_file()
+        return np.any(np.isnan(t_dat[locations]))
 
 
 def save_file(file_id: int, file_root: str,

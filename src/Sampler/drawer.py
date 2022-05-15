@@ -9,24 +9,24 @@
 """
 from typing import List
 import numpy as np
-from Sampler import file_reps
+from Sampler import file_sets
 
 
 class TDrawer:
 
-    def __init__(self, set_root: file_reps.FileSet,
+    def __init__(self, set_root: file_sets.FileSet,
                  twindow_size: int):
         """Iniitialization
 
         Args:
-            set_root (file_reps.FileSet): root file set object
+            set_root (file_sets.FileSet): root file set object
             twindow_size (int): timewindow size
             t_sample_prob (float, optional): sampling probability
                 for tpts within a file. Defaults to 1..
         """
         self.set_root = set_root
         self.twindow_size = twindow_size
-        self.filez = file_reps.get_files(self.set_root)
+        self.filez = file_sets.get_files(self.set_root)
         # initalize:
         self.t0s, self.fidns, self.total = self._init_file_map(self.filez)
         # singleton formulation
@@ -51,6 +51,7 @@ class TDrawer:
         """
         return t0s <= ar_len - self.twindow_size
 
+    # TODO: nope
     def _init_file_map(self, filez: List[file_reps.SingleFile]):
         """Initialize the internal file map
         NOTE: should close memmap files at end of exe (gc)
@@ -66,6 +67,7 @@ class TDrawer:
         ct0 = 0
         for cfile in filez:
             t0s.append(ct0)
+            # TODO: nope
             t_dat, _id_dat, t0_samples = file_reps.open_file(cfile)
             file_idns.append(cfile.idn)
 
@@ -112,6 +114,7 @@ class TDrawer:
         t0_offset = idx - self.t0s[targ_file_idx]
         # singleton handling:
         if self.tdat[targ_file_idx] is None:
+            # TODO: nope
             t_dat, id_dat, sample_t0s = file_reps.open_file(self.filez[targ_file_idx])
             self.tdat[targ_file_idx] = t_dat
             self.iddat[targ_file_idx] = id_dat

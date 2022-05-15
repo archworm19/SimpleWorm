@@ -4,7 +4,7 @@ import abc
 import dataclasses
 import numpy as np
 import numpy.random as npr
-from typing import List
+from typing import List, Tuple
 
 
 class FileWrapper(abc.ABC):
@@ -20,7 +20,17 @@ class FileWrapper(abc.ABC):
         """Get the available samples as index array
         
         Returns:
-            np.ndarray: indices of available sampels"""
+            np.ndarray: indices of available sampels
+        """
+        pass
+
+    def get_data_len(self):
+        """Get total length of the data 
+            = number of samples available before any sampling done
+        
+        Returns:
+            int: data length
+        """
         pass
 
     def sample(self, sample_inds: np.ndarray):
@@ -30,6 +40,19 @@ class FileWrapper(abc.ABC):
         Returns:
             copy of FileWrapper ~ underlying data should not change
                 Except for samples rep
+        """
+        pass
+
+    def check_nan(self, locations: Tuple[Tuple[int]]):
+        """Check if there are any nans in specified locations
+
+        Args:
+            locations (Tuple[Tuple[int]]): locations to check
+                specified in numpy indexing format = 
+                0th tuple for 0th axis, 1st tuple for 1st axis, etc.
+
+        Returns:
+            bool: true if any nans
         """
         pass
 
@@ -121,7 +144,7 @@ def get_files_struct(cset: FileSet):
 
     Returns:
         List[List[int]]: paths
-        List[List[SingleFile]]: filez
+        List[List[FileWrapper]]: filez
     """
     return _get_files(cset, [])
 
@@ -134,7 +157,7 @@ def get_files(cset: FileSet):
             should typically be the root of the set tree
     
     Returns:
-        List[SingleFile]: filez
+        List[FileWrapper]: filez
     """
     _, struct_files = get_files_struct(cset)
     filez = []
