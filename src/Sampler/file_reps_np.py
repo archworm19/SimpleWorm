@@ -94,7 +94,8 @@ class FileWrapperNP(FileWrapper):
         t_dat, _, _ = self.open_file()
         return np.shape(t_dat)[0]
     
-    def check_nan(self, locations: Tuple[Tuple[int]]):
+    def check_nan(self, locations: Tuple[Tuple[int]],
+                    target_tensor: int):
         # this is almost certainly not the most efficient system:
         t_dat, _, _ = self.open_file()
         return np.any(np.isnan(t_dat[locations]))

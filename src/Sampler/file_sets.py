@@ -43,13 +43,19 @@ class FileWrapper(abc.ABC):
         """
         pass
 
-    def check_nan(self, locations: Tuple[Tuple[int]]):
+    def check_nan(self, locations: Tuple[Tuple[int]],
+                    target_tensor: int):
         """Check if there are any nans in specified locations
 
         Args:
             locations (Tuple[Tuple[int]]): locations to check
                 specified in numpy indexing format = 
                 0th tuple for 0th axis, 1st tuple for 1st axis, etc.
+            target_tensor (int): which tensor we want to check
+                location against
+                Why? often times, we want to store multiple tensors together
+                    = a sample consists of tensors with different 
+                    meanings and/or different shapes
 
         Returns:
             bool: true if any nans

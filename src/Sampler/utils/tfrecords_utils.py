@@ -83,9 +83,23 @@ def open_tfr(file_names: List[str], dtype_map: Dict):
     return dataset
 
 
+def convert_tfdset_numpy(tfdset, target_idx: int):
+    """Convert tensorflow dataset to single numpy array
+        > stack the samples into single array
+    
+    Args:
+        tfsets: tensorflow dataset
+        target_idx: which tensor to pull from
+    
+    Returns:
+        np.ndarray: T x example_dims"""
+    rawv = [v[target_idx].numpy() for v in tfdset]
+    return np.array(rawv)
+    
+
 if __name__ == "__main__":
     import numpy.random as npr
-    # TODO/TESTING:
+    # initial testing without nans
     file_name = 'sample.tfr'
     file_name2 = 'sample2.tfr'
     np_map = {"x": npr.rand(10,5,2),
@@ -105,3 +119,20 @@ if __name__ == "__main__":
 
     # can we shuffle the dataset? yup ~ can do all normal ops
     dataset.shuffle(1)
+
+    # does tensorflow even allow nans? yes
+    file_name = 'sample_nan.tfr'
+    np_map = {"x": npr.rand(10, 5, 2),
+              "y": npr.rand(10, 8)}
+    dtype_map = {k: np_map[k].dtype for k in np_map}
+    # set the nan
+    np_map["x"][1,1,1] = np.nan
+    write_numpy_to_tfr(file_name, np_map)
+    # load up the datasets:
+    dataset = open_tfr([file_name, file_name2], dtype_map)
+    for i, (x, y) in enumerate(dataset):
+        if i == 1:
+            print('sample{0}'.format(str(i)))
+            print(x)
+    
+    print(convert_tfdset_numpy(dataset, 0))
