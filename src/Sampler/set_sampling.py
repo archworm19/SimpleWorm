@@ -47,7 +47,7 @@ class t0SamplerStrat(abc.ABC):
     # select t0s from available
     def sample(self, set_path: List[int],
                file_idx: int,
-               target_file: file_sets.SingleFile):
+               target_file: file_sets.FileWrapper):
         # returns: deepcopy of target file
         pass
 
