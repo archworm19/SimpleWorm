@@ -85,13 +85,3 @@ class FileWrapperTF(FileWrapper):
         # convert to numpy:
         np_dset = convert_tfdset_numpy(dset, target_tensor)
         return np.any(np.isnan(np_dset[locations]))
-
-    def open_file(self):
-        """Open the file --> get the tf dataset
-        NOTE: this is NOT part of FileWrapper interface
-            cuz highly dependent on the backend
-
-        Returns:
-            tensorflow dataset
-        """
-        return open_tfr([self.file_name], self.dtype_map)
