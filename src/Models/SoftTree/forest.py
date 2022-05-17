@@ -74,10 +74,9 @@ class SoftForest:
         """evaluate the whole tree
 
         Args:
-            x (TODO: tf type): input
-                batch_size x dim1 x dim2 x ...
-                where dims are dictated by layer factory
-                used to build the forest
+            x (tf.tensor of List[tf.tensor]): input
+                order/shape of x must match the supplied
+                LayerFactory
 
         Returns:
             TODO: tf type: leaf probabilities
@@ -142,6 +141,7 @@ def build_forest(depth: int,
     
     Returns:
         SoftForest object
+        int: width of softforest
     """
     # NOTE: forest width = layer width + 1 (includes offset)
     width = layer_factory.get_width() + 1
@@ -159,4 +159,4 @@ def build_forest(depth: int,
             parent.add_children(children)
             next_gen.extend(children)
         clevl = next_gen
-    return SoftForest(root_node)
+    return SoftForest(root_node), width

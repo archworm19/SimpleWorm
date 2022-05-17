@@ -259,6 +259,7 @@ class LayerMulti(LayerIface):
         return self.width
     
     def eval(self, x):
+        """x = List[tf.tensor]"""
         evs = [sl.eval(x) for sl in self.sub_layers]
         return tf.add_n(evs)
     

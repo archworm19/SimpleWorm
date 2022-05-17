@@ -3,6 +3,7 @@ from typing import List
 from Models.SoftTree import layers
 from Models.SoftTree import forest
 from Models.SoftTree import objective_funcs
+from Models.SoftTree import decoders
 import tensorflow as tf
 import numpy as np
 import numpy.random as npr
@@ -139,7 +140,7 @@ def test_gauss():
     num_model = 3
     num_state = 4
     dim = 5
-    GF = objective_funcs.GaussFull(num_model, num_state, dim, rng)
+    GF = decoders.GaussFull(num_model, num_state, dim, rng)
     # testing of built constructs
     munp = GF.mu.numpy()
     Lnp = GF.L.numpy()
