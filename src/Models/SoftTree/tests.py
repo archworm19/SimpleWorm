@@ -55,6 +55,10 @@ def test_layers():
             w_np = layer4.w[i*models_per_base + j].numpy()
             assert(np.sum(raw_np - w_np) < .00001)
 
+    # testing multilayer:
+    multi_layer = layers.LayerMulti([layer1, layer3])
+    assert(np.shape(multi_layer.eval(x).numpy()) == np.shape(layer1.eval(x).numpy()))
+
 
 def _get_layer_ws(node: forest.ForestNode, w_list: List):
     w_list.append(node.layer.w)
