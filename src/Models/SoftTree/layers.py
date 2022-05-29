@@ -55,6 +55,14 @@ class LayerIface(abc.ABC):
         """
         pass
 
+    def get_trainable_weights(self):
+        """Get the trainable weights
+        
+        Returns:
+            List[tf.tensor]
+        """
+        pass
+
 
 class LayerBasic(LayerIface):
     """Key: shared and spread components
@@ -88,6 +96,9 @@ class LayerBasic(LayerIface):
         assert(models_per_base > 0), "models per base 1 or more"
         self.rng = rng
         self.width = width
+        self.base_models = base_models
+        self.models_per_base = models_per_base
+        self.xshape = xshape
         # coefficients
         if base_models > 0:
             self.shared_comps = var_construct(rng, [base_models, 1, width] + xshape)
@@ -95,17 +106,23 @@ class LayerBasic(LayerIface):
             self.shared_comps = 0
         # SPREAD component = base_models x models_per_base x width
         self.spread_comps = var_construct(rng, [base_models, models_per_base, width] + xshape)
-        # --> base_models x models_per_base x ...
-        raw_w = self.shared_comps + self.spread_comps
-        # --> num_model x ...
-        self.w = tf.reshape(raw_w, [base_models * models_per_base, width] + xshape)
-        # add dim for batch
-        self.wop = tf.expand_dims(self.w, 0)
         # offsets
         self.offset = var_construct(rng, [base_models * models_per_base, width])
         # first 3 dims are batch_size, parallel models, width
         # --> should not be reduced
         self.reduce_dims = [3 + i for i in range(len(xshape))]
+
+    def _get_wop(self):
+        """Get operable W tensor; W = training weights
+        Have to do this here because tensorflow defaults to eager mode
+        """
+        # --> base_models x models_per_base x ...
+        raw_w = self.shared_comps + self.spread_comps
+        # --> num_model x ...
+        w = tf.reshape(raw_w, [self.base_models * self.models_per_base, self.width] + self.xshape)
+        # add dim for batch
+        wop = tf.expand_dims(w, 0)
+        return wop
 
     def eval(self, x):
         """Basic evaluation
@@ -121,8 +138,8 @@ class LayerBasic(LayerIface):
         # add dims for parallel models and width
         x = tf.expand_dims(x, 1)
         x = tf.expand_dims(x, 1)
-        return self.offset + tf.math.reduce_sum(x * self.wop,
-                                                axis=self.reduce_dims)
+        return (self.offset + tf.math.reduce_sum(x * self._get_wop(),
+                                                axis=self.reduce_dims))
     
     def get_width(self):
         return self.width
@@ -139,6 +156,9 @@ class LayerBasic(LayerIface):
                 scalar
         """
         return tf.reduce_sum(tf.abs(self.spread_comps))
+
+    def get_trainable_weights(self):
+        return [self.shared_comps, self.spread_comps, self.offset]
 
 
 class LayerFB(LayerIface):
@@ -182,46 +202,58 @@ class LayerFB(LayerIface):
         assert(fb_dim >= 1)
         self.rng = rng
         self.width = width
+        self.base_models = base_models
+        self.models_per_base = models_per_base
+        self.xshape = xshape
         # coefficients
         # dims overall = (base_models, models_per_base, width, fb_dim, ... xdims ...)
+        self.train_vars = []
         if base_models > 0:
             self.fb = var_construct(rng, [base_models, 1, 1, fb_dim] + xshape)
             self.w_shared = var_construct(rng, [base_models, 1, width, fb_dim]
                                                 + [1 for _ in xshape])
+            self.train_vars = [self.fb, self.w_shared]
         else:
             self.w_shared = 0
         # SPREAD component
         self.w_spread = var_construct(rng, [base_models, models_per_base, width, fb_dim]
                                              + [1 for _ in xshape])
-        # raw_r = fb w_shared + fb w_spread
-        # --> base_models x models_per_base x width x xdims
-        self.raw_w = tf.reduce_sum(self.fb * self.w_shared + self.fb * self.w_spread, axis=3)
-        # --> num_model x ...
-        self.w = tf.reshape(self.raw_w, [base_models * models_per_base, width] + xshape)
-        # add dim for batch
-        self.wop = tf.expand_dims(self.w, 0)
         # offsets
         self.offset = var_construct(rng, [base_models * models_per_base, width])
         # first 3 dims are batch_size, parallel models, width
         # --> should not be reduced
         self.reduce_dims = [3 + i for i in range(len(xshape))]
+        self.train_vars.extend([self.w_spread, self.offset])
+
+    def _get_wop(self):
+        """Get operable W tensor; W = training weights
+        Have to do this here because tensorflow defaults to eager mode
+        """
+        # raw_r = fb w_shared + fb w_spread
+        # --> base_models x models_per_base x width x xdims
+        raw_w = tf.reduce_sum(self.fb * self.w_shared + self.fb * self.w_spread, axis=3)
+        # --> num_model x ...
+        w = tf.reshape(raw_w, [self.base_models * self.models_per_base, self.width] + self.xshape)
+        # add dim for batch
+        wop = tf.expand_dims(w, 0)
+        return wop
 
     def eval(self, x):
         """Basic evaluation
 
         Args:
-            x (TODO): input tensor
+            x (tf.tensor): input tensor
                 batches x ...
         
         Returns:
-            TODO/TYPE: reduced tensor
+            tf.tensor: reduced tensor
                 batches x parallel models x width
         """
         # add dims for parallel models and width
         x = tf.expand_dims(x, 1)
         x = tf.expand_dims(x, 1)
-        return self.offset + tf.math.reduce_sum(x * self.wop,
-                                                axis=self.reduce_dims)
+        return (self.offset + tf.math.reduce_sum(x * self._get_wop(),
+                                                axis=self.reduce_dims))
     
     def get_width(self):
         return self.width
@@ -241,6 +273,9 @@ class LayerFB(LayerIface):
         # --> (base_models, models_per_base, width, ... xdims ...)
         sp_xdim = tf.reduce_sum(self.fb * self.w_spread, axis=3)
         return tf.reduce_sum(tf.abs(sp_xdim))
+
+    def get_trainable_weights(self):
+        return self.train_vars
 
 
 class LayerMulti(LayerIface):
@@ -264,12 +299,20 @@ class LayerMulti(LayerIface):
     
     def eval(self, x):
         """x = List[tf.tensor]"""
-        evs = [sl.eval(x) for sl in self.sub_layers]
+        evs = []
+        for xi, sl in zip(x, self.sub_layers):
+            evs.append(sl.eval(xi))
         return tf.add_n(evs)
     
     def spread_error(self):
         serr = [sl.spread_error() for sl in self.sub_layers]
         return tf.add_n(serr)
+
+    def get_trainable_weights(self):
+        twz = []
+        for sl in self.sub_layers:
+            twz.extend(sl.get_trainable_weights())
+        return twz
 
 
 # layer factories

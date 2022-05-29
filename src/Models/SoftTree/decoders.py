@@ -77,20 +77,28 @@ class GaussFull(log_prob_iface):
         self.L_base = var_construct(rng, [num_model, num_state, dim, dim])
         self.D_base = var_construct(rng, [num_model, num_state, dim, dim])
         self.tf_diag_mask = tf.constant(diag_mask[None, None].astype(np.float32))
-        # --> num_model x num_state x dim x dim; and each dim x dim matrix is LD constructed
-        self.L = self.L_base * tf.constant(tril_mask[None, None].astype(np.float32)) + self.tf_diag_mask
-        self.D = self.D_base
-        self.Dexp = tf.exp(self.D) * self.tf_diag_mask  # constrain positive and set off diags 0
-        # LD mult
-        ld = self._matmul_modstate(self.L, self.Dexp)
-        # LDL.T mult
-        L_trans = tf.transpose(self.L, perm=[0, 1, 3, 2])
-        # --> 1 x num_model x num_state x d x d
-        self.LDL = tf.expand_dims(self._matmul_modstate(ld, L_trans), 0)
+        self.tril_mask = tf.constant(tril_mask[None, None].astype(np.float32))
     
     def _matmul_modstate(self, x1, x2):
         # matmul where x1, x2 = [num_model, num_state, d, d]
         return tf.reduce_sum(tf.expand_dims(x1, 4) * tf.expand_dims(x2, 2), axis=3)
+
+    def _get_LDL_comps(self):
+        # --> num_model x num_state x dim x dim; and each dim x dim matrix is LD constructed
+        L = self.L_base * self.tril_mask + self.tf_diag_mask
+        Dexp = tf.exp(self.D_base) * self.tf_diag_mask  # constrain positive and set off diags 0
+        # LD mult
+        ld = self._matmul_modstate(L, Dexp)
+        # LDL.T mult
+        L_trans = tf.transpose(L, perm=[0, 1, 3, 2])
+        return L, Dexp, ld, L_trans
+
+    def _get_LDL(self):
+        """Have to get LDL matrix on demand to work with tensorflow eager execution"""
+        L, Dexp, ld, L_trans = self._get_LDL_comps()
+        # --> 1 x num_model x num_state x d x d
+        LDL = tf.expand_dims(self._matmul_modstate(ld, L_trans), 0)
+        return LDL
 
     def calc_log_prob(self, x):
         """Calculate log probability
@@ -109,7 +117,7 @@ class GaussFull(log_prob_iface):
         # diff from mean --> batch_size x num_model x num_state x d
         di = x - tf.expand_dims(self.mu, 0)
         # right mult: prec * di --> batch_size x num_model x num_state x d
-        rmul = tf.reduce_sum(self.LDL * tf.expand_dims(di, 4), axis=3)
+        rmul = tf.reduce_sum(self._get_LDL() * tf.expand_dims(di, 4), axis=3)
         # exponential term:
         exp_term = -.5 * tf.reduce_sum(rmul * di, axis=3)
 
@@ -122,7 +130,7 @@ class GaussFull(log_prob_iface):
         # = .5k * log 2pi - .5 * sum_i log exp(D_i)
         # = .5k * log 2pi - .5 * sum_i D_i
         denom_term = .5 * (self.dim * np.log(2. * np.pi) -
-                           tf.reduce_sum(self.D * self.tf_diag_mask, axis=[2,3]))
+                           tf.reduce_sum(self.D_base * self.tf_diag_mask, axis=[2,3]))
 
         return exp_term - tf.expand_dims(denom_term, 0)
 

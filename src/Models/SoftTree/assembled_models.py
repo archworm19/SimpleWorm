@@ -40,7 +40,10 @@ class GMMforest:
         self.mix_coeffs = tf.nn.softmax(var_construct(rng, [layer_factory.get_num_models(),
                                                             self.num_state, num_mix]), axis=-1)
         # trainable weights:
-        self.trainable_weights = self.ref_layers + self.decoder.get_trainable_weights()
+        self.trainable_weights = self.decoder.get_trainable_weights()
+        for rl in self.ref_layers:
+            self.trainable_weights.extend(rl.get_trainable_weights())
+                                   
     
     # TODO: probably need some prediction methods
     # > predict state? > predict average rep???
@@ -70,7 +73,8 @@ class GMMforest:
                 batch_size x num_model
         
         Returns:
-            tf.scalar
+            tf.tensor: prediction losses for each batch elem, model combo
+                batch_size x num_model
         """
         weights = self._weight_calc(forest_eval, data_weights)
 
@@ -80,7 +84,7 @@ class GMMforest:
         ll_res = tf.reshape(ll, [-1, self.num_model, self.num_state, self.num_mix])
     
         # negate for loss:
-        return -1 * tf.reduce_sum(weights * ll_res)
+        return -1 * tf.reduce_sum(weights * ll_res, axis=[2,3])
 
     def _forest_loss(self, forest_eval, data_weights):
         """Forest evaluation Loss
@@ -101,7 +105,9 @@ class GMMforest:
             data_weights (tf.tensor): weights on the data points
                 batch_size x num_model
 
-        Returns: tf.scalar
+        Returns:
+            tf.tensor: prediction losses for given batch + each model
+                num_model
         """
         # reshape for legal mult:
         dw = tf.expand_dims(data_weights, 2)
@@ -112,13 +118,51 @@ class GMMforest:
         # negentropy across state/leaves
         # --> num_model
         negent = tf.reduce_sum(wave * tf.math.log(wave), axis=1)
-        return tf.reduce_mean(negent)
+        return negent
     
     def _spread_loss(self):
         """Spread penalty for model layers
+
+        Returns:
+            tf.tensor scalar: spread error summed across all layers
+
         """
         sp_errs = [l.spread_error() for l in self.ref_layers]
         return tf.add_n(sp_errs)
+
+    def full_loss(self, x, y, data_weights):
+        """The full loss function ~ returns some intermediate losses
+
+        Args:
+            x (tf.tensor or List[tf.tensor]): inputs
+                type/shape must match what is specified by layer/layer factory
+            y (tf.tensor): target/truth ~ batch_size x 
+            data_weights (tf.tensor): weights on the data points
+                batch_size x num_model
+        
+        Returns:
+            tf.tensor: combined loss; scalar
+            tf.tensor: prediction loss; batch_size x num_model
+            tf.tensor: forest loss; num_model (quantity implicitly averages across batch)
+            tf.tensor: spread penalty; scalar
+        """
+        # forest evaluation: used by several loss funcs:
+        forest_eval = self.soft_forest.eval(x)
+
+        # batch_size x num_model
+        ploss = self._pred_loss(forest_eval, y, data_weights)
+        # num_model
+        floss = self._forest_loss(forest_eval, data_weights)
+        # scalar
+        sloss = self._spread_loss()
+
+        # combo loss = combine all losses with penalties
+        combo_loss = (tf.reduce_sum(ploss) 
+                        + self.forest_penalty * tf.reduce_sum(floss)
+                        + self.spread_penalty * sloss)
+
+        # return combo and intermediates
+        return combo_loss, ploss, floss, sloss
 
     def loss(self, x, y, data_weights):
         """The loss function
@@ -129,13 +173,12 @@ class GMMforest:
             y (tf.tensor): target/truth ~ batch_size x 
             data_weights (tf.tensor): weights on the data points
                 batch_size x num_model
+        
+        Returns:
+            tf.tensor: combined loss; scalar
         """
-        # forest evaluation: used by several loss funcs:
-        forest_eval = self.soft_forest.eval(x)
-        # combined loss function:
-        return (self._pred_loss(forest_eval, y, data_weights)
-                + self.forest_penalty * self._forest_loss(forest_eval, data_weights)
-                + self.spread_penalty * self._spread_loss())
+        combo_loss, _ploss, _floss, _sloss = self.full_loss(x, y, data_weights)
+        return combo_loss
     
     def get_trainable_weights(self):
         """Get the trainable weights

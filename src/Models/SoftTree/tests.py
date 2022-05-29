@@ -4,6 +4,7 @@ from Models.SoftTree import layers
 from Models.SoftTree import forest
 from Models.SoftTree import decoders
 from Models.SoftTree.assembled_models import GMMforest
+import Models.SoftTree.train_model as train_model
 import tensorflow as tf
 import numpy as np
 import numpy.random as npr
@@ -27,8 +28,7 @@ def test_layers():
     # ensure layers are not identical == factory (not clone)
     assert(np.sum(layer1.eval(x).numpy() != layer2.eval(x).numpy()) >= 1)
     assert(np.shape(layer1.eval(x).numpy()) == (2, 12, 3))
-    assert(np.shape(layer1.w.numpy()) == tuple([num_base_model * models_per_base, width] + xshape))
-    assert(np.shape(layer1.wop.numpy()) == tuple([1, num_base_model * models_per_base, width] + xshape))
+    assert(np.shape(layer1._get_wop().numpy()) == tuple([1, num_base_model * models_per_base, width] + xshape))
     assert(np.shape(layer1.offset.numpy()) == (12, 3))
     # first 3 = batch_size, num_model, width (reduce across xshape)
     assert(layer1.reduce_dims == [3, 4])
@@ -40,7 +40,6 @@ def test_layers():
     layer4 = LFLR.build_layer()
     assert(np.sum(layer3.eval(x).numpy() != layer4.eval(x).numpy()) >= 1)
     assert(np.shape(layer3.eval(x).numpy()) == (2, 12, 3))
-    assert(np.shape(layer3.w.numpy()) == tuple([num_base_model * models_per_base, width] + xshape))
     assert(np.shape(layer3.fb.numpy()) == tuple([num_base_model, 1, 1, low_dim] + xshape))
     assert(np.shape(layer3.w_shared.numpy()) == tuple([num_base_model, 1, width, low_dim]
                                                         + [1 for _ in xshape]))
@@ -49,20 +48,22 @@ def test_layers():
 
     # test that parallel model flattening is done correctly:
     # raw_w = base_models x models_per_base x width x xdims
-    # while w = base_models * models_per_base x width x xdims
+    # while wop = 1 x base_models * models_per_base x width x xdims
+    raw_w = tf.reduce_sum(layer4.fb * layer4.w_shared + layer4.fb * layer4.w_spread, axis=3).numpy()
+    wop = layer4._get_wop().numpy()
     for i in range(num_base_model):
         for j in range(models_per_base):
-            raw_np = layer4.raw_w[i,j].numpy()
-            w_np = layer4.w[i*models_per_base + j].numpy()
+            raw_np = raw_w[i,j]
+            w_np = wop[0,i*models_per_base + j]
             assert(np.sum(raw_np - w_np) < .00001)
 
     # testing multilayer:
     multi_layer = layers.LayerMulti([layer1, layer3])
-    assert(np.shape(multi_layer.eval(x).numpy()) == np.shape(layer1.eval(x).numpy()))
+    assert(np.shape(multi_layer.eval([x,x]).numpy()) == np.shape(layer1.eval(x).numpy()))
 
 
 def _get_layer_ws(node: forest.ForestNode, w_list: List):
-    w_list.append(node.layer.w)
+    w_list.append(node.layer._get_wop()[0])
     for child in node.children:
         _get_layer_ws(child, w_list)
 
@@ -111,7 +112,7 @@ def test_eval_forest():
     F, LFLR, depth = _build_forest()
     # layer shape?
     sample_layer = LFLR.build_layer()
-    w_shape = np.shape(sample_layer.w.numpy())
+    w_shape = np.shape(sample_layer._get_wop().numpy())[1:]
     # assuming flattened (which should _build_forest is)
     [num_models, _layer_width, dims] = w_shape
     x = tf.ones([batch_size, dims])
@@ -143,9 +144,10 @@ def test_gauss():
     GF = decoders.GaussFull(num_model, num_state, dim, rng)
     # testing of built constructs
     munp = GF.mu.numpy()
-    Lnp = GF.L.numpy()
-    Dnp = GF.Dexp.numpy()
-    LDLnp = GF.LDL.numpy()  # precision matrix
+    L, Dexp, _ld, _L_trans = GF._get_LDL_comps()
+    Lnp = L.numpy()
+    Dnp = Dexp.numpy()
+    LDLnp = GF._get_LDL().numpy()  # precision matrix
     assert(np.shape(Lnp) == (num_model, num_state, dim, dim))
     assert(np.shape(Dnp) == (num_model, num_state, dim, dim))
     assert(np.shape(LDLnp) == (1, num_model, num_state, dim, dim))  # pad for batch
@@ -206,9 +208,9 @@ def test_GMMForest():
                                                 (width+1)**depth))
     data_weights = tf.ones([batch_size, base_models * models_per_base])
     floss = model._forest_loss(forest_eval, data_weights)
-    assert(floss.numpy() < 0)  # negentropy should be negative for this case
-    assert(np.fabs(floss.numpy() - -2.1552913) < tol)
-    assert(np.fabs(model._spread_loss().numpy() - 1289.4651) < tol)
+    assert(np.all(floss.numpy() < 0))  # negentropy should be negative for this case
+    assert(np.fabs(np.sum(floss.numpy()) - -17.24233) < tol)
+    assert(np.fabs(np.sum(model._spread_loss().numpy()) - 1289.4651) < tol)
 
     # weights = batch_size x num_models x num_state/num_leaf x number of gaussian mixture components
     # ... states and mixture comps are prob distros --> outer product will be a prob distro
@@ -218,19 +220,65 @@ def test_GMMForest():
     assert(np.all((np.sum(weights.numpy(), axis=(2,3)) - 1.) < tol))
 
     y = tf.ones([batch_size, gauss_dim])
-    assert((model._pred_loss(forest_eval, y, data_weights).numpy() - 1713.0427) < tol)
+    assert((np.sum(model._pred_loss(forest_eval, y, data_weights).numpy()) - 1713.0427) < tol)
     # ensure that all current x is best
-    valz = [model._pred_loss(forest_eval, y, data_weights).numpy()]
+    valz = [np.sum(model._pred_loss(forest_eval, y, data_weights).numpy())]
     for di in range(1,6):
         forest_eval = model.soft_forest.eval(x + x*.1*di)
-        valz.append(model._pred_loss(forest_eval, y, data_weights).numpy())
+        valz.append(np.sum(model._pred_loss(forest_eval, y, data_weights).numpy()))
     assert(np.all(np.diff(np.array(valz)) < 0.0))
     assert((model.loss(x, y, data_weights).numpy() - 3000.3525) < tol)
 
     # num forest weights
     nf_weights = sum([(width + 1)**i for i in range(3)])
     # num gauss weights = 3 for this gauss
-    assert(len(model.get_trainable_weights()) == (nf_weights + 3))
+    # for FB layers --> 4 vars per layer
+    assert(len(model.get_trainable_weights()) == (4 * nf_weights + 3))
+
+
+def test_GMMForest_train():
+    depth = 3
+    base_models = 2
+    models_per_base = 4
+    xshape = [6,7]
+    xshape2 = [4]
+    width = 2
+    fb_dim = 5
+    rng = npr.default_rng(42)
+    # single x layer
+    layer_factory1 = layers.LayerFactoryFB(base_models, models_per_base, xshape,
+                                            width, fb_dim, rng)
+    layer_factory2 = layers.LayerFactoryFB(base_models, models_per_base, xshape2,
+                                            width, fb_dim, rng)
+    layer_factory_combo = layers.LayerFactoryMulti([layer_factory1, layer_factory2])
+
+    depth = 3
+    gauss_dim = 5
+    num_mix = 6
+    model = GMMforest(depth, layer_factory_combo, num_mix, gauss_dim, 0., 0., rng)
+
+    # make the dataset:
+    # weights --> split some models to predict 1s, some models to predict -1s
+    y = np.vstack((np.ones((100, gauss_dim)), -1 * np.ones((100, gauss_dim)))).astype(np.float32)
+    weights = np.ones((200, 8)) * .1
+    weights[:100,:4] = 1
+    weights[100:,4:] = 1
+    T = 100
+    train_dset = tf.data.Dataset.from_tensor_slices((np.ones([200] + xshape, np.float32), np.ones([200] + xshape2, np.float32),
+                                                     y, weights.astype(np.float32)))
+    opt = tf.keras.optimizers.SGD(learning_rate=1e-3)
+    batch_size = 64
+    e_loss = train_model.train(train_dset.shuffle(1024).batch(batch_size), model, optimizer=opt, num_epoch=10)
+    print(e_loss)
+    assert(e_loss[-1] < e_loss[0])
+
+    # by construction, first 4 models should predict 1s and second 4 should predict -1s
+    weights = np.ones((200, 8))
+    train_dset = tf.data.Dataset.from_tensor_slices((np.ones([200] + xshape, np.float32), np.ones([200] + xshape2, np.float32),
+                                                     y, weights.astype(np.float32)))
+    _, p_loss = train_model.eval_losses(train_dset.batch(1), model)
+    assert(np.sum(p_loss[:T,:4]) < np.sum(p_loss[:T,4:]))
+    assert(np.sum(p_loss[T:,:4]) > np.sum(p_loss[T:,4:]))
 
 
 if __name__ == '__main__':
@@ -239,3 +287,4 @@ if __name__ == '__main__':
     test_eval_forest()
     test_gauss()
     test_GMMForest()
+    test_GMMForest_train()
