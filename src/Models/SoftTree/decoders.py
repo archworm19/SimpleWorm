@@ -28,6 +28,14 @@ class log_prob_iface(abc.ABC):
         """
         pass
 
+    def get_trainable_weights(self):
+        """Get the trainable weights for optimization
+        
+        Returns:
+            List[tf.tensor]
+        """
+        pass
+
 
 class GaussFull(log_prob_iface):
     """Full Variance Gaussian
@@ -66,12 +74,12 @@ class GaussFull(log_prob_iface):
         diag_mask = np.diag(np.ones((dim,)))
         base_tril_mask = np.tril(np.ones((dim,)))
         tril_mask = base_tril_mask * (1 - diag_mask)
-        L_base = var_construct(rng, [num_model, num_state, dim, dim])
-        D_base = var_construct(rng, [num_model, num_state, dim, dim])
+        self.L_base = var_construct(rng, [num_model, num_state, dim, dim])
+        self.D_base = var_construct(rng, [num_model, num_state, dim, dim])
         self.tf_diag_mask = tf.constant(diag_mask[None, None].astype(np.float32))
         # --> num_model x num_state x dim x dim; and each dim x dim matrix is LD constructed
-        self.L = L_base * tf.constant(tril_mask[None, None].astype(np.float32)) + self.tf_diag_mask
-        self.D = D_base
+        self.L = self.L_base * tf.constant(tril_mask[None, None].astype(np.float32)) + self.tf_diag_mask
+        self.D = self.D_base
         self.Dexp = tf.exp(self.D) * self.tf_diag_mask  # constrain positive and set off diags 0
         # LD mult
         ld = self._matmul_modstate(self.L, self.Dexp)
@@ -120,3 +128,13 @@ class GaussFull(log_prob_iface):
 
     def get_num_states(self):
         return self.num_state
+
+    # TODO: need test case for this
+    def get_trainable_weights(self):
+        """Get the trainable weights for optimization
+        
+        Returns:
+            List[tf.tensor]
+        """
+        # means + the two covariance components
+        return [self.mu, self.L_base, self.D_base]

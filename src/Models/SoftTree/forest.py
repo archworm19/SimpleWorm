@@ -142,10 +142,14 @@ def build_forest(depth: int,
     Returns:
         SoftForest object
         int: width of softforest
+        List[LayerIface]: reference to all of the created layers
     """
     # NOTE: forest width = layer width + 1 (includes offset)
     width = layer_factory.get_width() + 1
     root_node = ForestNode(layer_factory.build_layer())
+
+    # layer references
+    layer_refs = [root_node]
 
     # build the rest:
     clevl = [root_node]
@@ -154,9 +158,11 @@ def build_forest(depth: int,
         for parent in clevl:
             children = []
             for _ in range(width):
-                children.append(ForestNode(layer_factory.build_layer()))
+                c_layer = layer_factory.build_layer()
+                children.append(ForestNode(c_layer))
+                layer_refs.append(c_layer)
             # assign children to parent:
             parent.add_children(children)
             next_gen.extend(children)
         clevl = next_gen
-    return SoftForest(root_node), width
+    return SoftForest(root_node), width, layer_refs

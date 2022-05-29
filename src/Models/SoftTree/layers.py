@@ -29,22 +29,30 @@ def var_construct(rng: npr.Generator, v_shape: List[int], v_scale: int = 1.):
 
 class LayerIface(abc.ABC):
 
-    # TODO: tensorflow types??
     def eval(self, x):
         """Evaluate layer
 
         Args:
-            x (TODO): input tensor
+            x (tf.tensor): input tensor
                 batches x parallel models x ...
         
         Returns:
-            TODO:TYPE?: reduced tensor
+            tf.tensor: reduced tensor
                 batches x num_parallel_models x width
         """
         pass
 
     def get_width(self):
         """Report the width"""
+        pass
+
+    def spread_error(self):
+        """Calculate the spread error for the layer
+
+        Returns:
+            tf.tensor scalar: L1 norm summed across all spread components
+                scalar
+        """
         pass
 
 
@@ -103,11 +111,11 @@ class LayerBasic(LayerIface):
         """Basic evaluation
 
         Args:
-            x (TODO): input tensor
+            x (tf.tensor): input tensor
                 batches x ...
         
         Returns:
-            TODO/TYPE: reduced tensor
+            tf.tensor: reduced tensor
                 batches x parallel models x width
         """
         # add dims for parallel models and width
@@ -119,8 +127,6 @@ class LayerBasic(LayerIface):
     def get_width(self):
         return self.width
 
-    # TODO: there should probably be a separate interface for this
-    # TODO: maybe a better name too
     def spread_error(self):
         """Calculate the spread error for the layer
         > Spread Error = defined for a given model group (base component + sub_models)
@@ -129,7 +135,7 @@ class LayerBasic(LayerIface):
                                  + w_spread (components for each model in the group)
         
         Returns:
-            _type_: L1 norm summed across all spread components
+            tf.tensor scalar: L1 norm summed across all spread components
                 scalar
         """
         return tf.reduce_sum(tf.abs(self.spread_comps))
@@ -220,8 +226,6 @@ class LayerFB(LayerIface):
     def get_width(self):
         return self.width
 
-    # TODO: there should probably be a separate interface for this
-    # TODO: maybe a better name too
     def spread_error(self):
         """Calculate the spread error for the layer
         > Spread Error = defined for a given model group (base component + sub_models)
