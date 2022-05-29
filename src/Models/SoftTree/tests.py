@@ -2,8 +2,8 @@
 from typing import List
 from Models.SoftTree import layers
 from Models.SoftTree import forest
-from Models.SoftTree import objective_funcs
 from Models.SoftTree import decoders
+from Models.SoftTree.assembled_models import GMMforest
 import tensorflow as tf
 import numpy as np
 import numpy.random as npr
@@ -76,7 +76,7 @@ def _build_forest():
     low_dim = 4
     rng = npr.default_rng(42)
     LFLR = layers.LayerFactoryFB(num_base_models, models_per_base, xshape, width, low_dim, rng)
-    F = forest.build_forest(depth, LFLR)
+    F, _, _ = forest.build_forest(depth, LFLR)
     return F, LFLR, depth
 
 
@@ -178,9 +178,64 @@ def test_gauss():
             prob = m_normal.pdf(xnp, mean=munp[i,j], cov=npla.pinv(LDLnp[0,i,j]))
             assert(np.sum(lpnp[:,i,j] - np.log(prob)) < tolerance)
 
+    # trainable vars:
+    assert(len(GF.get_trainable_weights()) == 3)
+
+
+def test_GMMForest():
+    tol = 1e-4
+    batch_size = 24
+    depth = 3
+    base_models = 2
+    models_per_base = 4
+    xshape = [6,7]
+    x = tf.ones([batch_size] + xshape)
+    width = 2
+    fb_dim = 5
+    rng = npr.default_rng(42)
+    # single x layer
+    layer_factory = layers.LayerFactoryFB(base_models, models_per_base, xshape,
+                                            width, fb_dim, rng)
+
+    depth = 3
+    gauss_dim = 5
+    num_mix = 6
+    model = GMMforest(depth, layer_factory, num_mix, gauss_dim, 1., 1., rng)
+    forest_eval = model.soft_forest.eval(x)
+    assert(np.shape(forest_eval.numpy()) == (batch_size, base_models * models_per_base,
+                                                (width+1)**depth))
+    data_weights = tf.ones([batch_size, base_models * models_per_base])
+    floss = model._forest_loss(forest_eval, data_weights)
+    assert(floss.numpy() < 0)  # negentropy should be negative for this case
+    assert(np.fabs(floss.numpy() - -2.1552913) < tol)
+    assert(np.fabs(model._spread_loss().numpy() - 1289.4651) < tol)
+
+    # weights = batch_size x num_models x num_state/num_leaf x number of gaussian mixture components
+    # ... states and mixture comps are prob distros --> outer product will be a prob distro
+    weights = model._weight_calc(forest_eval, data_weights)
+    assert(np.shape(weights.numpy()) == (batch_size, base_models * models_per_base,
+                                            (width+1)**depth, num_mix))
+    assert(np.all((np.sum(weights.numpy(), axis=(2,3)) - 1.) < tol))
+
+    y = tf.ones([batch_size, gauss_dim])
+    assert((model._pred_loss(forest_eval, y, data_weights).numpy() - 1713.0427) < tol)
+    # ensure that all current x is best
+    valz = [model._pred_loss(forest_eval, y, data_weights).numpy()]
+    for di in range(1,6):
+        forest_eval = model.soft_forest.eval(x + x*.1*di)
+        valz.append(model._pred_loss(forest_eval, y, data_weights).numpy())
+    assert(np.all(np.diff(np.array(valz)) < 0.0))
+    assert((model.loss(x, y, data_weights).numpy() - 3000.3525) < tol)
+
+    # num forest weights
+    nf_weights = sum([(width + 1)**i for i in range(3)])
+    # num gauss weights = 3 for this gauss
+    assert(len(model.get_trainable_weights()) == (nf_weights + 3))
+
 
 if __name__ == '__main__':
     test_layers()
     test_forest_build()
     test_eval_forest()
     test_gauss()
+    test_GMMForest()

@@ -321,7 +321,7 @@ class LayerFactoryBasic(LayerFactoryIface):
         return self.width
     
     def get_num_models(self):
-        return self.num_models
+        return self.base_models * self.models_per_base
 
 
 class LayerFactoryFB(LayerFactoryIface):
@@ -360,7 +360,7 @@ class LayerFactoryFB(LayerFactoryIface):
         return self.width
     
     def get_num_models(self):
-        return self.num_models
+        return self.base_models * self.models_per_base
 
 
 class LayerFactoryMulti(LayerFactoryIface):

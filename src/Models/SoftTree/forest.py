@@ -146,10 +146,11 @@ def build_forest(depth: int,
     """
     # NOTE: forest width = layer width + 1 (includes offset)
     width = layer_factory.get_width() + 1
-    root_node = ForestNode(layer_factory.build_layer())
+    init_layer = layer_factory.build_layer()
+    root_node = ForestNode(init_layer)
 
     # layer references
-    layer_refs = [root_node]
+    layer_refs = [init_layer]
 
     # build the rest:
     clevl = [root_node]

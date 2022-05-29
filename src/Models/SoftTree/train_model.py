@@ -11,7 +11,7 @@ import tensorflow as tf
 # TODO: checking mechanisms to ensure shape matches
 
 
-# TODO: can train step take in model / optimizer???
+# TODO: can train step take in model / optimizer??? I believe so
 @tf.function
 def train_step(model, optimizer, x, y, data_weights):
     with tf.GradientTape() as tape:
