@@ -8,34 +8,19 @@
 """
 import tensorflow as tf
 import numpy as np
-
-# TODO: need better design for loss evaluation
-
+from Models.SoftTree.assembled_models import AModel
 
 
 # TODO: checking mechanisms to ensure shape matches
 
 
-# TODO: can train step take in model / optimizer??? I believe so
 @tf.function
-def train_step(model, optimizer, x, y, data_weights):
+def train_step(model: AModel, optimizer, x, y, data_weights):
     with tf.GradientTape() as tape:
         loss = model.loss(x, y, data_weights)
     grads = tape.gradient(loss, model.get_trainable_weights())
     optimizer.apply_gradients(zip(grads, model.get_trainable_weights()))
     return loss
-
-
-def test_train_step(model, x, y, data_weights):
-    with tf.GradientTape() as tape:
-        loss = model.loss(x, y, data_weights)
-        grads = tape.gradient(loss, model.get_trainable_weights())
-        missing = []
-        for i, g in enumerate(grads):
-            if g is None:
-                missing.append(i)
-        print(missing)
-            
 
 
 # TODO: we maybe should include timestep identifiers
@@ -47,40 +32,46 @@ def _gather_data(dat):
     return x, y, data_weights
 
 
-def train_epoch(train_dataset, model, optimizer):
+def train_epoch(train_dataset, model: AModel, optimizer):
     for _step, dat in enumerate(train_dataset):
         x, y, data_weights = _gather_data(dat)
         train_step(model, optimizer, x, y, data_weights)
-        #test_train_step(model, x, y, data_weights)
 
 
-# TODO: this is poor design ~ depends on concretions
-def eval_losses(train_dataset, model):
+def eval_losses(train_dataset, model: AModel):
     """Get prediction loss for each batch, model combination
 
     Args:
         train_dataset (tf.dataset): training dataset
-        model: the model  TODO: interface
+        model: the model
 
     Returns:
         np.ndarray: losses
             number of batches x number of models
     """
-    combo_losses, pred_losses = [], []
+    combo_losses = []
     for _step, dat in enumerate(train_dataset):
         x, y, data_weights = _gather_data(dat)
-        c_loss, p_loss, _, _ = model.full_loss(x, y, data_weights)
+        c_loss = model.loss_samples(x, y, data_weights)
         combo_losses.append(c_loss.numpy())
-        pred_losses.append(p_loss.numpy())
-    return np.vstack(combo_losses), np.vstack(pred_losses)
+    return np.vstack(combo_losses)
 
 
-# TODO: overall training
-def train(train_dataset, model, optimizer, num_epoch=3):
-    # TODO: docstring; gets loss at end of each epoch
+def train(train_dataset, model: AModel, optimizer, num_epoch=3):
+    """Train for a number of epochs
+
+    Args:
+        train_dataset (tf.dataset): tensorflow training dataset (should be batched)
+        model (AModel): assembeled model
+        optimizer (_type_): tensorflow optimizer
+        num_epoch (int, optional): number of epochs. Defaults to 3.
+
+    Returns:
+        List[float]: train set loss after each training epoch
+    """
     e_loss = []
     for _epoch in range(num_epoch):
         train_epoch(train_dataset, model, optimizer)
-        c_loss, _ = eval_losses(train_dataset, model)
+        c_loss = eval_losses(train_dataset, model)
         e_loss.append(np.sum(c_loss))
     return e_loss

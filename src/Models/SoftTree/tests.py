@@ -227,7 +227,7 @@ def test_GMMForest():
         forest_eval = model.soft_forest.eval(x + x*.1*di)
         valz.append(np.sum(model._pred_loss(forest_eval, y, data_weights).numpy()))
     assert(np.all(np.diff(np.array(valz)) < 0.0))
-    assert((model.loss(x, y, data_weights).numpy() - 3000.3525) < tol)
+    assert((model.loss(x, y, data_weights).numpy() - 32055.455) < tol)
 
     # num forest weights
     nf_weights = sum([(width + 1)**i for i in range(3)])
@@ -263,22 +263,29 @@ def test_GMMForest_train():
     weights = np.ones((200, 8)) * .1
     weights[:100,:4] = 1
     weights[100:,4:] = 1
-    T = 100
     train_dset = tf.data.Dataset.from_tensor_slices((np.ones([200] + xshape, np.float32), np.ones([200] + xshape2, np.float32),
                                                      y, weights.astype(np.float32)))
+
+    # ensure consistency in loss functions
+    for x1, x2, y1, w1 in train_dset.batch(1):
+        assert((model.loss((x1, x2), y1, w1).numpy() - np.sum(model.loss_samples((x1, x2), y1, w1))) < 1e-3)
+
+    # test training
     opt = tf.keras.optimizers.SGD(learning_rate=1e-3)
     batch_size = 64
     e_loss = train_model.train(train_dset.shuffle(1024).batch(batch_size), model, optimizer=opt, num_epoch=10)
-    print(e_loss)
     assert(e_loss[-1] < e_loss[0])
+    c_loss = train_model.eval_losses(train_dset.batch(1), model)
+    assert((np.sum(c_loss) - e_loss[-1]) < 1e-3)
 
     # by construction, first 4 models should predict 1s and second 4 should predict -1s
     weights = np.ones((200, 8))
     train_dset = tf.data.Dataset.from_tensor_slices((np.ones([200] + xshape, np.float32), np.ones([200] + xshape2, np.float32),
                                                      y, weights.astype(np.float32)))
-    _, p_loss = train_model.eval_losses(train_dset.batch(1), model)
-    assert(np.sum(p_loss[:T,:4]) < np.sum(p_loss[:T,4:]))
-    assert(np.sum(p_loss[T:,:4]) > np.sum(p_loss[T:,4:]))
+    c_loss = train_model.eval_losses(train_dset.batch(1), model)
+    assert(np.shape(c_loss) == (200, base_models * models_per_base))
+    assert(np.sum(c_loss[:100,:4]) < np.sum(c_loss[:100,4:]))
+    assert(np.sum(c_loss[100:,:4]) > np.sum(c_loss[100:,4:]))
 
 
 if __name__ == '__main__':
