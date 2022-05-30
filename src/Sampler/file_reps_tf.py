@@ -19,8 +19,6 @@ class FileWrapperTF(FileWrapper):
             sample_inds (np.ndarray): optional initial sampling indices
                 if not set, all samples will be set to useable
 
-        Returns:
-            tf.MapDataset: the dataset made up of tf tensors
         """
         self.file_name = file_name
         self.dtype_map = dtype_map
