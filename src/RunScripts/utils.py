@@ -2,8 +2,6 @@
 from typing import List
 import numpy as np
 
-from Sampler import file_reps
-
 
 def _check_shape(sh1: List[int], sh2: List[int]):
     """Check if shapes are the same
@@ -201,48 +199,3 @@ def build_standard_id(setz: List[List[np.ndarray]],
             id_sub.append(np.hstack((curt[:,None], se_tile)))
         id_dat.append(id_sub)
     return id_dat
-
-
-# file reps
-
-
-def build_file_set(ars: List[np.ndarray], id_ars: List[np.ndarray],
-                    t0_ars: List[np.ndarray], base_fn: str):
-    """Build a file set (and memmap files) from related arrays
-    > Related arrays = typically coming from the same animal strain
-    + exposed to same conditions
-
-    Args:
-        ars (List[np.ndarray]): cell activity arrays each array
-            = T x N
-        id_ars (List[np.ndarray]): identity arrays
-            = T x M
-        t0_ars (List[np.ndarray]): t0 arrays
-            = len T
-        base_fn (str): base file name
-    """
-    filez = []
-    for i, ar in enumerate(ars):
-        filez.append(file_reps.save_file(i, base_fn, ar, id_ars[i], t0_ars[i]))
-    file_set = file_reps.FileSet([], filez)
-    return file_set.open_file()
-
-
-def build_multi_file_set(ars: List[List[np.ndarray]], id_ars: List[List[np.ndarray]],
-                            base_fn: str):
-    """Build a file set for each subset (builds numpy memmap files too)
-    Assumes: sample all t0s
-
-    Args:
-        ars (List[List[np.ndarray]]): cell activity arrays each array
-            = T x N
-        id_ars (List[List[np.ndarray]]): identity arrays
-            = T x M
-        base_fn (str): base file name
-    """
-    root_set = file_reps.FileSet([], [])
-    for i in range(len(ars)):
-        ct0_ars = [np.arange(len(ar)) for ar in ars[i]]
-        sub_set = build_file_set(ars[i], id_ars[i], ct0_ars, "{0}_{1}".format(base_fn, str(i)))
-        root_set.sub_sets.append(sub_set)
-    return root_set

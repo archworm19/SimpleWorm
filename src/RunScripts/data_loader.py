@@ -1,9 +1,7 @@
 """Hardcoded functions to get worm data in correct format"""
-import imp
 from typing import List
 import os
 import copy
-from Sampler import file_reps
 import numpy as np
 import utils
 
