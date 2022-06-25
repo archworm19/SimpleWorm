@@ -92,6 +92,15 @@ class GMMforest(AModel):
                         * dw)
         return weights
 
+    # TODO: this is wrong!
+    # potential fix = assignment variables for every datapoint
+    # = N x M variable
+    # N = number of datapoints
+    # M = number of gaussians
+
+    # forest weights/dataweights are fundamentally different than noise error terms
+    # > forest weights = deterministic (current system ok) = can be treated as weights
+    # > gmm + mixtures = noise = should use log-likelihood?
     def _pred_loss(self, forest_eval, y, data_weights):
         """prediction Loss function
 
@@ -108,6 +117,7 @@ class GMMforest(AModel):
             tf.tensor: prediction losses for each batch elem, model combo
                 batch_size x num_model
         """
+        raise NotImplementedError()
         weights = self._weight_calc(forest_eval, data_weights)
 
         # log-likes of each gaussian:
