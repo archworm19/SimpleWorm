@@ -14,7 +14,7 @@ class AModelEM(abc.ABC):
     # Assembeled Model interface
     # NOTE: EM framwork --> loss funcs will need latent state probs
 
-    def latent_posterior(self, x, y, data_weights):
+    def latent_posterior(self, x, y):
         """Calculate the posterior probabilities
         of the latent state ~ p(Z | X, theta_t)
         used by the E step in expectation maximization
@@ -23,18 +23,13 @@ class AModelEM(abc.ABC):
             x (tf.tensor or List[tf.tensor]): inputs
                 type/shape must match what is specified by layer/layer factory
             y (tf.tensor): target/truth ~ batch_size x 
-            data_weights (tf.tensor): weights on the data points
-                batch_size x num_model
-            latent_probs (tf.tensor): latent posteriors calculated from
-                latent_posterior method ~ treated as static here
-                batch_size x num_model x num_state x ...
         
         Returns:
             tf.tensor: combined loss; scalar
         """
         pass
 
-    def loss(self, x, y, data_weights):
+    def loss(self, x, y, data_weights, latent_probs):
         """The loss function
         Used by the M-step of expectation maximization
         Includes regularization loss
@@ -45,6 +40,9 @@ class AModelEM(abc.ABC):
             y (tf.tensor): target/truth ~ batch_size x 
             data_weights (tf.tensor): weights on the data points
                 batch_size x num_model
+            latent_probs (tf.tensor): latent posteriors calculated from
+                latent_posterior method ~ treated as static here
+                batch_size x num_model x num_state x ...
         
         Returns:
             tf.tensor: combined loss; scalar
@@ -82,6 +80,8 @@ class GMMforestEM(AModelEM):
     """forest_penalty = scale on state occupancy loss
     spread penalty = scale on spread loss function (applied in layers)"""
 
+    # TODO: gauss mean and variance initialization is super critical
+    # --> add initialization scheme!
     def __init__(self, depth: int, layer_factory: LayerFactoryIface,
                     num_mix: int, gauss_dim: int,
                     forest_penalty: float, spread_penalty: float,
@@ -102,11 +102,16 @@ class GMMforestEM(AModelEM):
         self.mix_coeffs = var_construct(rng, [layer_factory.get_num_models(),
                                         self.num_state, num_mix])
         # trainable weights:
-        self.trainable_weights = [self.mix_coeffs, self.decoder.get_trainable_weights()]
+        self.trainable_weights = [self.mix_coeffs]
+        self.trainable_weights.extend(self.decoder.get_trainable_weights())
         for rl in self.ref_layers:
             self.trainable_weights.extend(rl.get_trainable_weights())
 
+    def get_trainable_weights(self):
+        return self.trainable_weights
+
     def _get_mixture_prob(self):
+        # num_model x num_state x num_mixture
         return tf.nn.softmax(self.mix_coeffs, axis=-1)
 
     def _forward_probabilities(self, y):
@@ -120,10 +125,13 @@ class GMMforestEM(AModelEM):
         """
         # log probs --> batch_size x num_model x (num_state x num_mix)
         log_probs = self.decoder.calc_log_prob(y)
+
         # gaussian probs:
         gprobs = tf.math.exp(log_probs)
         # scale by mixture probs/coeffs
-        full_probs = gprobs * self._get_mixture_prob()
+        full_probs = (tf.reshape(gprobs, [-1, self.num_model, self.num_state, self.num_mix]) *
+                      tf.reshape(self._get_mixture_prob(), [1, self.num_model, self.num_state, self.num_mix]))
+        
         # reshape --> batch_size x num_model x num_state x num_mix
         return tf.reshape(full_probs, [-1, self.num_model, self.num_state, self.num_mix])
  
@@ -141,7 +149,7 @@ class GMMforestEM(AModelEM):
         return tf.math.divide(forward_probs,
                               tf.math.reduce_sum(forward_probs, axis=-1, keepdims=True))
 
-    def latent_posterior(self, x, y, data_weights):
+    def latent_posterior(self, x, y):
         """Calculate the posterior probabilities
         of the latent state ~ p(Z | X, theta_t)
         used by the E step in expectation maximization
@@ -155,8 +163,6 @@ class GMMforestEM(AModelEM):
             x (tf.tensor or List[tf.tensor]): inputs
                 type/shape must match what is specified by layer/layer factory
             y (tf.tensor): target/truth ~ batch_size x gauss_dim
-            data_weights (tf.tensor): weights on the data points
-                batch_size x num_model
         
         Returns:
             tf.tensor: probabilities of latent states
@@ -193,14 +199,20 @@ class GMMforestEM(AModelEM):
         forest_probs = self.soft_forest.eval(x)
 
         # forward log probabilities
-        # --> batch_size x num_model x num_state x num_mix
-        for_probs = self._forward_probabilities(y)
+        # log probs --> batch_size x num_model x (num_state x num_mix)
+        # TODO: should be able to handle mixing coeffs more efficiently
+        # TODO: mathematically apply log to softmax
+        log_probs = (tf.reshape(self.decoder.calc_log_prob(y),
+                                [-1, self.num_model, self.num_state, self.num_mix]) +
+                     tf.reshape(tf.math.log(self._get_mixture_prob()),
+                                [1, self.num_model, self.num_state, self.num_mix]))
 
         # scaling forward log probabilties
         # scale = forest_probs * latent_probs; and data_weights select
-        pred_loss =  (tf.reshape(forest_probs, [-1, self.num_model, self.num_state, 1]) * 
-                      latent_probs *
-                      for_probs)
+        # negation --> negative log-likelihood
+        pred_loss =  -1 * (tf.reshape(forest_probs, [-1, self.num_model, self.num_state, 1]) * 
+                           latent_probs *
+                           tf.reshape(log_probs, [-1, self.num_model, self.num_state, self.num_mix]))
         return pred_loss, forest_probs
     
     def loss_samples_noreg(self, x, y, latent_probs):
@@ -227,8 +239,9 @@ class GMMforestEM(AModelEM):
         """
         data_weights = tf.reshape(data_weights, [-1, self.num_model, 1, 1])
 
-        # prediction loss
-        pred_loss, forest_pred = tf.reduce_sum(data_weights * self._loss_samples_noreg(x, y, latent_probs))
+        # prediction loss full:
+        pred_loss_full, forest_pred = self._loss_samples_noreg(x, y, tf.stop_gradient(latent_probs))
+        pred_loss = tf.reduce_sum(pred_loss_full)
 
         return (pred_loss + 
                 self.forest_penalty * tf.reduce_sum(forest_loss(forest_pred, data_weights)) +

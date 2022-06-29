@@ -3,7 +3,8 @@ from typing import List
 from Models.SoftTree import layers
 from Models.SoftTree import forest
 from Models.SoftTree import decoders
-from Models.SoftTree.assembled_models import GMMforest
+from Models.SoftTree.assembled_models_em import GMMforestEM
+from Models.SoftTree.objective_funcs import forest_loss, spread_loss
 import Models.SoftTree.train_model as train_model
 import tensorflow as tf
 import numpy as np
@@ -184,7 +185,7 @@ def test_gauss():
     assert(len(GF.get_trainable_weights()) == 3)
 
 
-def test_GMMForest():
+def test_GMMForestEM():
     tol = 1e-4
     batch_size = 24
     depth = 3
@@ -202,90 +203,144 @@ def test_GMMForest():
     depth = 3
     gauss_dim = 5
     num_mix = 6
-    model = GMMforest(depth, layer_factory, num_mix, gauss_dim, 1., 1., rng)
+    model = GMMforestEM(depth, layer_factory, num_mix, gauss_dim, 1., 1., rng)
     forest_eval = model.soft_forest.eval(x)
     assert(np.shape(forest_eval.numpy()) == (batch_size, base_models * models_per_base,
                                                 (width+1)**depth))
+    
+    
     data_weights = tf.ones([batch_size, base_models * models_per_base])
-    floss = model._forest_loss(forest_eval, data_weights)
+    floss = forest_loss(forest_eval, data_weights)
     assert(np.all(floss.numpy() < 0))  # negentropy should be negative for this case
     assert(np.fabs(np.sum(floss.numpy()) - -17.24233) < tol)
-    assert(np.fabs(np.sum(model._spread_loss().numpy()) - 1289.4651) < tol)
+    assert(np.fabs(np.sum(spread_loss(model.ref_layers).numpy()) - 1289.4651) < tol)
 
-    # weights = batch_size x num_models x num_state/num_leaf x number of gaussian mixture components
-    # ... states and mixture comps are prob distros --> outer product will be a prob distro
-    weights = model._weight_calc(forest_eval, data_weights)
-    assert(np.shape(weights.numpy()) == (batch_size, base_models * models_per_base,
-                                            (width+1)**depth, num_mix))
-    assert(np.all((np.sum(weights.numpy(), axis=(2,3)) - 1.) < tol))
+    # mixture coefficients/probs
+    mix_coeffs = model._get_mixture_prob()
+    assert(np.shape(mix_coeffs.numpy()) == (base_models * models_per_base, (width+1)**depth, num_mix))
+    assert(np.all(mix_coeffs.numpy() >= 0.0))
+    # norm property
+    assert(np.all(np.fabs(np.sum(mix_coeffs.numpy(), axis=-1) - 1.) < tol))
 
+    # forward probabilties
+    # --> batch_size x num_model x num_state x num_mix
     y = tf.ones([batch_size, gauss_dim])
-    assert((np.sum(model._pred_loss(forest_eval, y, data_weights).numpy()) - 1713.0427) < tol)
-    # ensure that all current x is best
-    valz = [np.sum(model._pred_loss(forest_eval, y, data_weights).numpy())]
-    for di in range(1,6):
-        forest_eval = model.soft_forest.eval(x + x*.1*di)
-        valz.append(np.sum(model._pred_loss(forest_eval, y, data_weights).numpy()))
-    assert(np.all(np.diff(np.array(valz)) < 0.0))
-    assert((model.loss(x, y, data_weights).numpy() - 32055.455) < tol)
+    for_probs = model._forward_probabilities(y)
+    assert(np.shape(for_probs.numpy()) == (batch_size, base_models * models_per_base, (width+1)**depth, num_mix))
 
-    # num forest weights
-    nf_weights = sum([(width + 1)**i for i in range(3)])
-    # num gauss weights = 3 for this gauss
-    # for FB layers --> 4 vars per layer
-    assert(len(model.get_trainable_weights()) == (4 * nf_weights + 3))
+    # posterior probabilities:
+    post_probs = model._posterior_probabilities(for_probs)
+    assert(np.shape(for_probs.numpy()) == np.shape(post_probs.numpy()))
+    assert(np.all(np.fabs(np.sum(post_probs.numpy(), axis=-1) - 1.) < tol))
+
+    # latent probs:
+    latent_probs = model.latent_posterior(x, y)
+    assert(np.shape(for_probs.numpy()) == np.shape(latent_probs.numpy()))
+    assert(np.all(np.fabs(np.sum(latent_probs.numpy(), axis=-1) - 1.) < tol))
+
+    # loss samples:
+    loss_samples, _ = model._loss_samples_noreg(x, y, latent_probs)
+    assert(np.shape(loss_samples.numpy()) == (batch_size, base_models * models_per_base, (width+1)**depth, num_mix))
 
 
-def test_GMMForest_train():
-    depth = 3
-    base_models = 2
-    models_per_base = 4
-    xshape = [6,7]
-    xshape2 = [4]
-    width = 2
+def _em_helper(model, optimizer, x, y, data_weights, num_epoch=50, num_step=100):
+    # EM
+    z = None
+    losses = []
+    mus = [model.decoder.mu.numpy()]
+    for _epoch in range(num_epoch):
+        z = model.latent_posterior(x, y)
+        for _step in range(num_step):
+            with tf.GradientTape() as tape:
+                loss = model.loss(x, y, data_weights, z)
+                grads = tape.gradient(loss, model.get_trainable_weights())
+                optimizer.apply_gradients(zip(grads, model.get_trainable_weights()))
+        losses.append(model.loss(x, y, data_weights, z))
+        mus.append(model.decoder.mu.numpy())
+    return np.array(mus), losses
+
+
+def test_GMMForestEM_simplefit():
+    # fit to 2 gaussians
+    import pylab as plt
+    from tensorflow.keras.optimizers import Adam
+
+    # model generation
+    depth = 1  # just the root node
+    base_models = 1
+    models_per_base = 1
+    xshape = [2]
+    width = 1  # will yield 2 separate branches / states
     fb_dim = 5
     rng = npr.default_rng(42)
     # single x layer
-    layer_factory1 = layers.LayerFactoryFB(base_models, models_per_base, xshape,
+    layer_factory = layers.LayerFactoryFB(base_models, models_per_base, xshape,
                                             width, fb_dim, rng)
-    layer_factory2 = layers.LayerFactoryFB(base_models, models_per_base, xshape2,
-                                            width, fb_dim, rng)
-    layer_factory_combo = layers.LayerFactoryMulti([layer_factory1, layer_factory2])
 
-    depth = 3
-    gauss_dim = 5
-    num_mix = 6
-    model = GMMforest(depth, layer_factory_combo, num_mix, gauss_dim, 0., 0., rng)
+    gauss_dim = 2
+    num_mix = 2
+    model = GMMforestEM(depth, layer_factory, num_mix, gauss_dim, 100., 0., rng)
 
-    # make the dataset:
-    # weights --> split some models to predict 1s, some models to predict -1s
-    y = np.vstack((np.ones((100, gauss_dim)), -1 * np.ones((100, gauss_dim)))).astype(np.float32)
-    weights = np.ones((200, 8)) * .1
-    weights[:100,:4] = 1
-    weights[100:,4:] = 1
-    train_dset = tf.data.Dataset.from_tensor_slices((np.ones([200] + xshape, np.float32), np.ones([200] + xshape2, np.float32),
-                                                     y, weights.astype(np.float32)))
+    # 2 clusters with no input info
+    # Each state should split
+    y1 = npr.rand(10, 2) + np.array([2,0])
+    y2 = npr.rand(10, 2) + np.array([0,2])
+    y = np.vstack([y1, y2]).astype(np.float32)
+    x = (0. * y).astype(np.float32)  # removes information
+    data_weights = np.ones((10,1)).astype(np.float32)
 
-    # ensure consistency in loss functions
-    for x1, x2, y1, w1 in train_dset.batch(1):
-        assert((model.loss((x1, x2), y1, w1).numpy() - np.sum(model.loss_samples((x1, x2), y1, w1))) < 1e-3)
 
-    # test training
-    opt = tf.keras.optimizers.SGD(learning_rate=1e-3)
-    batch_size = 64
-    e_loss = train_model.train(train_dset.shuffle(1024).batch(batch_size), model, optimizer=opt, num_epoch=10)
-    assert(e_loss[-1] < e_loss[0])
-    c_loss = train_model.eval_losses(train_dset.batch(1), model)
-    assert((np.sum(c_loss) - e_loss[-1]) < 1e-3)
+    """
+    # EM
+    optimizer = Adam(0.1)
+    mus, losses = _em_helper(model, optimizer, x, y, data_weights, num_epoch=20)
+    
+    plt.figure()
+    plt.plot(losses)
 
-    # by construction, first 4 models should predict 1s and second 4 should predict -1s
-    weights = np.ones((200, 8))
-    train_dset = tf.data.Dataset.from_tensor_slices((np.ones([200] + xshape, np.float32), np.ones([200] + xshape2, np.float32),
-                                                     y, weights.astype(np.float32)))
-    c_loss = train_model.eval_losses(train_dset.batch(1), model)
-    assert(np.shape(c_loss) == (200, base_models * models_per_base))
-    assert(np.sum(c_loss[:100,:4]) < np.sum(c_loss[:100,4:]))
-    assert(np.sum(c_loss[100:,:4]) > np.sum(c_loss[100:,4:]))
+    plt.figure()
+    plt.scatter(y[:,0], y[:,1])
+    # blue = state 1
+    plt.plot(mus[:,0,0,0], mus[:,0,0,1], color='b')
+    plt.plot(mus[:,0,1,0], mus[:,0,1,1], color='b')
+    # red = state 2
+    plt.plot(mus[:,0,2,0], mus[:,0,2,1], color='r')
+    plt.plot(mus[:,0,3,0], mus[:,0,3,1], color='r')
+
+    plt.show()
+    """
+
+
+    # repeat but deterministic
+    # should get state separation
+    # --> current finding = crappy sub/mix states die --> collapses to deterministic
+    # TODO: this one's having some issues now ~ one of the states is collapsing
+    # TODO: is it because initial estimate is trash?
+    # TODO: is it because we upped the number of steps per epoch?
+
+    # OBSERVATION: low forest penalty --> 
+    model = GMMforestEM(depth, layer_factory, num_mix, gauss_dim, 1., 0., rng)
+    # TODO/TESTING: trying so that means are centered
+    y1 = npr.rand(10, 2) + np.array([2,0])
+    y2 = npr.rand(10, 2) + np.array([0,2])
+    y = np.vstack([y1, y2]).astype(np.float32)
+    x = y
+    optimizer = Adam(0.1)
+    mus, losses = _em_helper(model, optimizer, x, y, data_weights, num_epoch=100, num_step=10)
+
+    plt.figure()
+    plt.plot(losses)
+
+    plt.figure()
+    plt.scatter(y[:,0], y[:,1])
+    # blue = state 1
+    plt.plot(mus[:,0,0,0], mus[:,0,0,1], color='b')
+    plt.plot(mus[:,0,1,0], mus[:,0,1,1], color='b')
+    # red = state 2
+    plt.plot(mus[:,0,2,0], mus[:,0,2,1], color='r')
+    plt.plot(mus[:,0,3,0], mus[:,0,3,1], color='r')
+
+    plt.show()
 
 
 if __name__ == '__main__':
@@ -293,5 +348,5 @@ if __name__ == '__main__':
     test_forest_build()
     test_eval_forest()
     test_gauss()
-    test_GMMForest()
-    test_GMMForest_train()
+    test_GMMForestEM()
+    test_GMMForestEM_simplefit()
