@@ -42,7 +42,8 @@ def forest_loss(forest_eval, data_weights):
     # negentropy across state/leaves
     # --> num_model
     negent = tf.reduce_sum(wave * tf.math.log(wave), axis=1)
-    return negent
+    # scale by batch_size to make it batch_size dependent
+    return negent * tf.cast(tf.shape(forest_eval)[0], negent.dtype)
 
 
 def spread_loss(ref_layers: List[LayerIface]):

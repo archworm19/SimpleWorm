@@ -212,7 +212,7 @@ def test_GMMForestEM():
     data_weights = tf.ones([batch_size, base_models * models_per_base])
     floss = forest_loss(forest_eval, data_weights)
     assert(np.all(floss.numpy() < 0))  # negentropy should be negative for this case
-    assert(np.fabs(np.sum(floss.numpy()) - -17.24233) < tol)
+    assert(np.fabs(np.sum(floss.numpy()) - -413.81592) < tol)
     assert(np.fabs(np.sum(spread_loss(model.ref_layers).numpy()) - 1289.4651) < tol)
 
     # mixture coefficients/probs
@@ -277,9 +277,10 @@ def test_GMMForestEM_simplefit():
     layer_factory = layers.LayerFactoryFB(base_models, models_per_base, xshape,
                                             width, fb_dim, rng)
 
+
     gauss_dim = 2
     num_mix = 2
-    model = GMMforestEM(depth, layer_factory, num_mix, gauss_dim, 100., 0., rng)
+    model = GMMforestEM(depth, layer_factory, num_mix, gauss_dim, 10., 0., rng)
 
     # 2 clusters with no input info
     # Each state should split
@@ -290,7 +291,6 @@ def test_GMMForestEM_simplefit():
     data_weights = np.ones((10,1)).astype(np.float32)
 
 
-    """
     # EM
     optimizer = Adam(0.1)
     mus, losses = _em_helper(model, optimizer, x, y, data_weights, num_epoch=20)
@@ -308,7 +308,6 @@ def test_GMMForestEM_simplefit():
     plt.plot(mus[:,0,3,0], mus[:,0,3,1], color='r')
 
     plt.show()
-    """
 
 
     # repeat but deterministic
@@ -318,11 +317,16 @@ def test_GMMForestEM_simplefit():
     # TODO: is it because initial estimate is trash?
     # TODO: is it because we upped the number of steps per epoch?
 
-    # OBSERVATION: low forest penalty --> 
-    model = GMMforestEM(depth, layer_factory, num_mix, gauss_dim, 1., 0., rng)
+    # TODO: TEMPERATURE PLAN
+    # > limit the range of probabilities for latent states (early: max = 0.8 or something)
+    # > as iter, increase the range --> allow approx hard assignment
+
+    # OBSERVATION: low forest penalty --> one branch dies
+    # HIGH FOREST PENALTY --> chaotic results
+    model = GMMforestEM(depth, layer_factory, num_mix, gauss_dim, 0., 0., rng)
     # TODO/TESTING: trying so that means are centered
-    y1 = npr.rand(10, 2) + np.array([2,0])
-    y2 = npr.rand(10, 2) + np.array([0,2])
+    y1 = npr.rand(100, 2) + np.array([2,0])  # TODO: try different data set sizes
+    y2 = npr.rand(100, 2) + np.array([0,2])
     y = np.vstack([y1, y2]).astype(np.float32)
     x = y
     optimizer = Adam(0.1)
