@@ -77,30 +77,44 @@ class AModelEM(abc.ABC):
 
 
 class GMMforestEM(AModelEM):
+    # TODO/NOTE: should be able to make a more generic version of this 
+    # that can be injected with a state predictor model (like a soft forest)
     """forest_penalty = scale on state occupancy loss
-    spread penalty = scale on spread loss function (applied in layers)"""
+    spread penalty = scale on spread loss function (applied in layers)
+    
+    
+    SSM (state-space model) ~ Half-Bayesian approach (EM)
+    X = output here; input factored into theta
+    > Goal = estimate L(theta; X) = integral_z [p(X, Z | theta]
+    > We use Expectation Maximization approx -->
+    > exp_[Z|X, theta_t] [log L(theta; X, Z)]
+    > = exp_z [log P(X, Z | theta_t)] = exp_z [log p(X | Z, theta_t) + log p(Z, theta_t)]
+    For EM, need to estimate p(Z | X, theta_t) ~ expectation over this distro
+    > p(Z | X, theta_t) = p(X | Z, theta_t) p(Z | theta_t) / norm ~ from Bayes
+    > Assumption for this model! p(X | Z, theta_t) = p(X | Z, theta_gauss)
+    > > theta_gauss = the gaussian/decoding subset of model params theta
+    """
 
     # TODO: gauss mean and variance initialization is super critical
     # --> add initialization scheme!
     def __init__(self, depth: int, layer_factory: LayerFactoryIface,
-                    num_mix: int, gauss_dim: int,
+                    gauss_dim: int,
                     forest_penalty: float, spread_penalty: float,
                     rng: npr.Generator):
         """Model construction"""
         self.soft_forest, self.width, self.ref_layers = build_forest(depth, layer_factory)
         self.num_state = int(self.width ** depth)
         self.num_model = layer_factory.get_num_models()
-        self.num_mix = num_mix
         self.gauss_dim = gauss_dim
         self.forest_penalty = forest_penalty
         self.spread_penalty = spread_penalty
         self.decoder = GaussFull(layer_factory.get_num_models(),
-                                    self.num_state * num_mix,
+                                    self.num_state,
                                     gauss_dim, rng)
 
         # variable for mixing coeffs: num_model x num_state x num_mixture
         self.mix_coeffs = var_construct(rng, [layer_factory.get_num_models(),
-                                        self.num_state, num_mix])
+                                              self.num_state])
         # trainable weights:
         self.trainable_weights = [self.mix_coeffs]
         self.trainable_weights.extend(self.decoder.get_trainable_weights())
@@ -111,53 +125,17 @@ class GMMforestEM(AModelEM):
         return self.trainable_weights
 
     def _get_mixture_prob(self):
-        # num_model x num_state x num_mixture
+        """returns num_model x num_state tensor"""
         return tf.nn.softmax(self.mix_coeffs, axis=-1)
-
-    def _forward_probabilities(self, y):
-        """Calculate Gaussian Forward probabilities
-
-        Args:
-            y (tf.tensor): target/truth ~ batch_size x gauss_dim
-
-        Returns:
-            tf.tensor: batch_size x num_model x num_state x num_mix
-        """
-        # log probs --> batch_size x num_model x (num_state x num_mix)
-        log_probs = self.decoder.calc_log_prob(y)
-
-        # gaussian probs:
-        gprobs = tf.math.exp(log_probs)
-        # scale by mixture probs/coeffs
-        full_probs = (tf.reshape(gprobs, [-1, self.num_model, self.num_state, self.num_mix]) *
-                      tf.reshape(self._get_mixture_prob(), [1, self.num_model, self.num_state, self.num_mix]))
-        
-        # reshape --> batch_size x num_model x num_state x num_mix
-        return tf.reshape(full_probs, [-1, self.num_model, self.num_state, self.num_mix])
- 
-    def _posterior_probabilities(self, forward_probs):
-        """calculate posterior probabilities for each state
-        --> normalize across mixture within each state
-
-        Args:
-            forward_probs (tf.tensor): batch_size x num_model x num_state x num_mix
-
-        Returns:
-            tf.tensor: posterior probabilities
-                same shape as input
-        """
-        return tf.math.divide(forward_probs,
-                              tf.math.reduce_sum(forward_probs, axis=-1, keepdims=True))
 
     def latent_posterior(self, x, y):
         """Calculate the posterior probabilities
-        of the latent state ~ p(Z | X, theta_t)
-        used by the E step in expectation maximization
+        For EM, need to estimate p(Z | X, theta_t) ~ expectation over this distro
+        > p(Z | X, theta_t) = p(X | Z, theta_t) p(Z | theta_t) / norm ~ from Bayes
+        > Assumption for this model! p(X | Z, theta_t) = p(X | Z, theta_gauss)
+        > > theta_gauss = the gaussian/decoding subset of model params theta
 
-        NOTE: calculates posterior within each mixture
-        and DOES NOT use forest scaling here
-        forest scaling gets factored in loss
-        --> sum for single sample = 1 * num_model * num_state
+        NOTE: occurs separately from opt (M step) --> might as well call forest directly
 
         Args:
             x (tf.tensor or List[tf.tensor]): inputs
@@ -167,20 +145,36 @@ class GMMforestEM(AModelEM):
         Returns:
             tf.tensor: probabilities of latent states
                 for this model
-                batch_size x num_model x num_state x num_mix
+                batch_size x num_model x num_state
         """
-        # forward probabilities
-        for_probs = self._forward_probabilities(y)
+        # p(X | Z, theta_gauss)
+        # log probs --> batch_size x num_model x num_state
+        # --> batch_size x num_model x num_state
+        log_probs = self.decoder.calc_log_prob(y)
+        # gaussian probs:
+        gprobs_nomix = tf.math.exp(log_probs)
+        # mixure coeffs:
+        gprobs = gprobs_nomix * tf.expand_dims(self._get_mixture_prob(), 0)
 
-        # posterior probabilities
-        post_probs = self._posterior_probabilities(for_probs)
+        # p(Z | theta_t)
+        # --> batch_size x num_model x num_state
+        forest_probs = self.soft_forest.eval(x)
 
-        # scale posteriors by forest probs
-        return post_probs
+        # forward probs:
+        fprobs = gprobs * forest_probs
+
+        # normalize --> posterior:
+        return tf.stop_gradient(tf.math.divide(fprobs, tf.sum(fprobs, axis=-1, keepdims=True)))
+
 
     def _loss_samples_noreg(self, x, y, latent_probs):
-        """The loss function for predictions
-        If no regularization, loss --> _pred_loss
+        """The loss function for predictions; noreg = no regularization
+        > Goal = estimate L(theta; X) = integral_z [p(X, Z | theta]
+        > We use Expectation Maximization approx -->
+        > exp_[Z|X, theta_t] [log L(theta; X, Z)]
+        > = exp_z [log P(X, Z | theta_t)] = exp_z [log p(X | Z, theta_t) + log p(Z, theta_t)]
+
+        # TODO: for gaussian, probs faster (but less stable) to not use gradient descent
 
         Args:
             x (tf.tensor or List[tf.tensor]): inputs
@@ -188,32 +182,29 @@ class GMMforestEM(AModelEM):
             y (tf.tensor): target/truth ~ batch_size x 
             latent_probs (tf.tensor): latent posteriors calculated from
                 latent_posterior method ~ treated as static here
-                batch_size x num_model x num_state x num_mix
+                batch_size x num_model x num_state
         
         Returns:
             tf.tensor: undreduced prediction loss without regularization
                 batch_size x num_model x num_state x num_mix
             tf.tensor: forest probabilities
         """
-        # run thru forest to get outer state probs --> batch_size x num_model x num_state
-        forest_probs = self.soft_forest.eval(x)
+        # log p(X | Z, theta_t) = log p(X | Z, theta_gauss) by assumption
+        # log probs --> batch_size x num_model x num_state
+        # --> batch_size x num_model x num_state
+        log_probs = self.decoder.calc_log_prob(y)
+        # log mixture probs
+        # TODO: this term can def be simplified
+        log_mix = tf.math.log(tf.expand_dims(self._get_mixture_prob(), 0))
 
-        # forward log probabilities
-        # log probs --> batch_size x num_model x (num_state x num_mix)
-        # TODO: should be able to handle mixing coeffs more efficiently
-        # TODO: mathematically apply log to softmax
-        log_probs = (tf.reshape(self.decoder.calc_log_prob(y),
-                                [-1, self.num_model, self.num_state, self.num_mix]) +
-                     tf.reshape(tf.math.log(self._get_mixture_prob()),
-                                [1, self.num_model, self.num_state, self.num_mix]))
+        # log p(Z, theta_t)
+        # --> batch_size x num_model x num_state
+        # TODO: more math can be done for this as well...
+        forest_pred = self.soft_forest.eval(x)
+        log_forest = tf.math.log(forest_pred)
 
-        # scaling forward log probabilties
-        # scale = forest_probs * latent_probs; and data_weights select
-        # negation --> negative log-likelihood
-        pred_loss =  -1 * (tf.reshape(forest_probs, [-1, self.num_model, self.num_state, 1]) * 
-                           latent_probs *
-                           tf.reshape(log_probs, [-1, self.num_model, self.num_state, self.num_mix]))
-        return pred_loss, forest_probs
+        # scale probs and return negative
+        return -1 * latent_probs * (log_probs + log_mix + log_forest), forest_pred
     
     def loss_samples_noreg(self, x, y, latent_probs):
         """thin wrapper to make interface work"""
@@ -237,10 +228,8 @@ class GMMforestEM(AModelEM):
         Returns:
             tf.tensor: combined loss; scalar
         """
-        data_weights = tf.reshape(data_weights, [-1, self.num_model, 1, 1])
-
         # prediction loss full:
-        pred_loss_full, forest_pred = self._loss_samples_noreg(x, y, tf.stop_gradient(latent_probs))
+        pred_loss_full, forest_pred = tf.expand_dims(data_weights, 2) * self._loss_samples_noreg(x, y, tf.stop_gradient(latent_probs))
         pred_loss = tf.reduce_sum(pred_loss_full)
 
         return (pred_loss + 

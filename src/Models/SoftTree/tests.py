@@ -242,6 +242,14 @@ def test_GMMForestEM():
     loss_samples, _ = model._loss_samples_noreg(x, y, latent_probs)
     assert(np.shape(loss_samples.numpy()) == (batch_size, base_models * models_per_base, (width+1)**depth, num_mix))
 
+    # test scaling probabilities
+    # = forest_probs * log_probs; do they normalize properly?
+    forest_probs = model.soft_forest.eval(x)
+    latent_probs = model.latent_posterior(x, y)
+    scale = tf.reshape(forest_probs, [-1, model.num_model, model.num_state, 1]) * latent_probs
+    assert(np.shape(scale.numpy()) == (batch_size, base_models * models_per_base, (width+1)**depth, num_mix))
+    assert(np.all(np.fabs(np.sum(scale.numpy(), axis=(2,3)) - 1.) < tol))
+
 
 def _em_helper(model, optimizer, x, y, data_weights, num_epoch=50, num_step=100):
     # EM
@@ -257,6 +265,11 @@ def _em_helper(model, optimizer, x, y, data_weights, num_epoch=50, num_step=100)
                 optimizer.apply_gradients(zip(grads, model.get_trainable_weights()))
         losses.append(model.loss(x, y, data_weights, z))
         mus.append(model.decoder.mu.numpy())
+        print('iter')
+        print(z)
+        print(z * tf.expand_dims(model.soft_forest.eval(x), 3))
+        print(mus[-1])
+        input('cont?')
     return np.array(mus), losses
 
 
@@ -267,9 +280,9 @@ def test_GMMForestEM_simplefit():
 
     # model generation
     depth = 1  # just the root node
-    base_models = 1
+    base_models = 2
     models_per_base = 1
-    xshape = [2]
+    xshape = [3]  # x, y, constant
     width = 1  # will yield 2 separate branches / states
     fb_dim = 5
     rng = npr.default_rng(42)
@@ -287,10 +300,10 @@ def test_GMMForestEM_simplefit():
     y1 = npr.rand(10, 2) + np.array([2,0])
     y2 = npr.rand(10, 2) + np.array([0,2])
     y = np.vstack([y1, y2]).astype(np.float32)
-    x = (0. * y).astype(np.float32)  # removes information
+    x = np.hstack((0 * y, np.ones((20,1)))).astype(np.float32)
     data_weights = np.ones((10,1)).astype(np.float32)
 
-
+    """
     # EM
     optimizer = Adam(0.1)
     mus, losses = _em_helper(model, optimizer, x, y, data_weights, num_epoch=20)
@@ -308,6 +321,7 @@ def test_GMMForestEM_simplefit():
     plt.plot(mus[:,0,3,0], mus[:,0,3,1], color='r')
 
     plt.show()
+    """
 
 
     # repeat but deterministic
@@ -323,14 +337,14 @@ def test_GMMForestEM_simplefit():
 
     # OBSERVATION: low forest penalty --> one branch dies
     # HIGH FOREST PENALTY --> chaotic results
-    model = GMMforestEM(depth, layer_factory, num_mix, gauss_dim, 0., 0., rng)
+    model = GMMforestEM(depth, layer_factory, num_mix, gauss_dim, 10., 0., rng)
     # TODO/TESTING: trying so that means are centered
-    y1 = npr.rand(100, 2) + np.array([2,0])  # TODO: try different data set sizes
-    y2 = npr.rand(100, 2) + np.array([0,2])
+    y1 = npr.rand(10, 2) + np.array([2,0])  # TODO: try different data set sizes
+    y2 = npr.rand(10, 2) + np.array([0,2])
     y = np.vstack([y1, y2]).astype(np.float32)
-    x = y
+    x = np.hstack((y, np.ones((20,1)))).astype(np.float32)
     optimizer = Adam(0.1)
-    mus, losses = _em_helper(model, optimizer, x, y, data_weights, num_epoch=100, num_step=10)
+    mus, losses = _em_helper(model, optimizer, x, y, data_weights, num_epoch=10, num_step=30)
 
     plt.figure()
     plt.plot(losses)
@@ -343,6 +357,15 @@ def test_GMMForestEM_simplefit():
     # red = state 2
     plt.plot(mus[:,0,2,0], mus[:,0,2,1], color='r')
     plt.plot(mus[:,0,3,0], mus[:,0,3,1], color='r')
+
+    # 2nd model
+    # green = state 1
+    plt.plot(mus[:,1,0,0], mus[:,1,0,1], color='g')
+    plt.plot(mus[:,1,1,0], mus[:,1,1,1], color='g')
+    # black = state 2
+    plt.plot(mus[:,1,2,0], mus[:,1,2,1], color='k')
+    plt.plot(mus[:,1,3,0], mus[:,1,3,1], color='k')
+
 
     plt.show()
 
