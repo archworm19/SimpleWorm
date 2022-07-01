@@ -191,6 +191,7 @@ def test_GMMForestEM():
     depth = 3
     base_models = 2
     models_per_base = 4
+    num_state = base_models * models_per_base
     xshape = [6,7]
     x = tf.ones([batch_size] + xshape)
     width = 2
@@ -202,8 +203,7 @@ def test_GMMForestEM():
 
     depth = 3
     gauss_dim = 5
-    num_mix = 6
-    model = GMMforestEM(depth, layer_factory, num_mix, gauss_dim, 1., 1., rng)
+    model = GMMforestEM(depth, layer_factory, gauss_dim, 1., 1., rng)
     forest_eval = model.soft_forest.eval(x)
     assert(np.shape(forest_eval.numpy()) == (batch_size, base_models * models_per_base,
                                                 (width+1)**depth))
@@ -217,38 +217,21 @@ def test_GMMForestEM():
 
     # mixture coefficients/probs
     mix_coeffs = model._get_mixture_prob()
-    assert(np.shape(mix_coeffs.numpy()) == (base_models * models_per_base, (width+1)**depth, num_mix))
+    assert(np.shape(mix_coeffs.numpy()) == (base_models * models_per_base, (width+1)**depth))
     assert(np.all(mix_coeffs.numpy() >= 0.0))
     # norm property
     assert(np.all(np.fabs(np.sum(mix_coeffs.numpy(), axis=-1) - 1.) < tol))
 
-    # forward probabilties
-    # --> batch_size x num_model x num_state x num_mix
     y = tf.ones([batch_size, gauss_dim])
-    for_probs = model._forward_probabilities(y)
-    assert(np.shape(for_probs.numpy()) == (batch_size, base_models * models_per_base, (width+1)**depth, num_mix))
-
-    # posterior probabilities:
-    post_probs = model._posterior_probabilities(for_probs)
-    assert(np.shape(for_probs.numpy()) == np.shape(post_probs.numpy()))
-    assert(np.all(np.fabs(np.sum(post_probs.numpy(), axis=-1) - 1.) < tol))
 
     # latent probs:
     latent_probs = model.latent_posterior(x, y)
-    assert(np.shape(for_probs.numpy()) == np.shape(latent_probs.numpy()))
+    assert(np.shape(latent_probs.numpy()) == (batch_size, base_models * models_per_base, (width+1)**depth))
     assert(np.all(np.fabs(np.sum(latent_probs.numpy(), axis=-1) - 1.) < tol))
 
     # loss samples:
     loss_samples, _ = model._loss_samples_noreg(x, y, latent_probs)
-    assert(np.shape(loss_samples.numpy()) == (batch_size, base_models * models_per_base, (width+1)**depth, num_mix))
-
-    # test scaling probabilities
-    # = forest_probs * log_probs; do they normalize properly?
-    forest_probs = model.soft_forest.eval(x)
-    latent_probs = model.latent_posterior(x, y)
-    scale = tf.reshape(forest_probs, [-1, model.num_model, model.num_state, 1]) * latent_probs
-    assert(np.shape(scale.numpy()) == (batch_size, base_models * models_per_base, (width+1)**depth, num_mix))
-    assert(np.all(np.fabs(np.sum(scale.numpy(), axis=(2,3)) - 1.) < tol))
+    assert(np.shape(loss_samples.numpy()) == (batch_size, base_models * models_per_base, (width+1)**depth))
 
 
 def _em_helper(model, optimizer, x, y, data_weights, num_epoch=50, num_step=100):
@@ -265,11 +248,6 @@ def _em_helper(model, optimizer, x, y, data_weights, num_epoch=50, num_step=100)
                 optimizer.apply_gradients(zip(grads, model.get_trainable_weights()))
         losses.append(model.loss(x, y, data_weights, z))
         mus.append(model.decoder.mu.numpy())
-        print('iter')
-        print(z)
-        print(z * tf.expand_dims(model.soft_forest.eval(x), 3))
-        print(mus[-1])
-        input('cont?')
     return np.array(mus), losses
 
 
@@ -280,7 +258,7 @@ def test_GMMForestEM_simplefit():
 
     # model generation
     depth = 1  # just the root node
-    base_models = 2
+    base_models = 1
     models_per_base = 1
     xshape = [3]  # x, y, constant
     width = 1  # will yield 2 separate branches / states
@@ -292,8 +270,7 @@ def test_GMMForestEM_simplefit():
 
 
     gauss_dim = 2
-    num_mix = 2
-    model = GMMforestEM(depth, layer_factory, num_mix, gauss_dim, 10., 0., rng)
+    model = GMMforestEM(depth, layer_factory, gauss_dim, 10., 0., rng)
 
     # 2 clusters with no input info
     # Each state should split
@@ -301,72 +278,45 @@ def test_GMMForestEM_simplefit():
     y2 = npr.rand(10, 2) + np.array([0,2])
     y = np.vstack([y1, y2]).astype(np.float32)
     x = np.hstack((0 * y, np.ones((20,1)))).astype(np.float32)
-    data_weights = np.ones((10,1)).astype(np.float32)
+    data_weights = np.ones((20,1)).astype(np.float32)
 
-    """
     # EM
     optimizer = Adam(0.1)
     mus, losses = _em_helper(model, optimizer, x, y, data_weights, num_epoch=20)
+    
+    # mus = tsteps x num_model x num_state x dim
+
+    plt.figure()
+    plt.plot(losses)
+
+    plt.figure()
+    plt.scatter(y[:,0], y[:,1])
+    # model 
+    plt.plot(mus[:,0,0,0], mus[:,0,0,1], color='b')
+    plt.plot(mus[:,0,1,0], mus[:,0,1,1], color='r')
+    plt.show()
+
+
+    # repeat but deterministic
+    # should get lower error!
+    # for 1 model -->
+    # error for x = y*0: -100 (10 epochs); -105 (20 epochs)
+    # error for x = y: -112 (10 epochs); -101 (20 epochs lol); -121 (100 epochs)
+    # ... lol EM: yeah, super messy but def better
+
+    model = GMMforestEM(depth, layer_factory, gauss_dim, 10., 0., rng)
+    x = np.hstack((1 * y, np.ones((20,1)))).astype(np.float32)
+    # EM
+    optimizer = Adam(0.1)
+    mus, losses = _em_helper(model, optimizer, x, y, data_weights, num_epoch=100)
     
     plt.figure()
     plt.plot(losses)
 
     plt.figure()
     plt.scatter(y[:,0], y[:,1])
-    # blue = state 1
     plt.plot(mus[:,0,0,0], mus[:,0,0,1], color='b')
-    plt.plot(mus[:,0,1,0], mus[:,0,1,1], color='b')
-    # red = state 2
-    plt.plot(mus[:,0,2,0], mus[:,0,2,1], color='r')
-    plt.plot(mus[:,0,3,0], mus[:,0,3,1], color='r')
-
-    plt.show()
-    """
-
-
-    # repeat but deterministic
-    # should get state separation
-    # --> current finding = crappy sub/mix states die --> collapses to deterministic
-    # TODO: this one's having some issues now ~ one of the states is collapsing
-    # TODO: is it because initial estimate is trash?
-    # TODO: is it because we upped the number of steps per epoch?
-
-    # TODO: TEMPERATURE PLAN
-    # > limit the range of probabilities for latent states (early: max = 0.8 or something)
-    # > as iter, increase the range --> allow approx hard assignment
-
-    # OBSERVATION: low forest penalty --> one branch dies
-    # HIGH FOREST PENALTY --> chaotic results
-    model = GMMforestEM(depth, layer_factory, num_mix, gauss_dim, 10., 0., rng)
-    # TODO/TESTING: trying so that means are centered
-    y1 = npr.rand(10, 2) + np.array([2,0])  # TODO: try different data set sizes
-    y2 = npr.rand(10, 2) + np.array([0,2])
-    y = np.vstack([y1, y2]).astype(np.float32)
-    x = np.hstack((y, np.ones((20,1)))).astype(np.float32)
-    optimizer = Adam(0.1)
-    mus, losses = _em_helper(model, optimizer, x, y, data_weights, num_epoch=10, num_step=30)
-
-    plt.figure()
-    plt.plot(losses)
-
-    plt.figure()
-    plt.scatter(y[:,0], y[:,1])
-    # blue = state 1
-    plt.plot(mus[:,0,0,0], mus[:,0,0,1], color='b')
-    plt.plot(mus[:,0,1,0], mus[:,0,1,1], color='b')
-    # red = state 2
-    plt.plot(mus[:,0,2,0], mus[:,0,2,1], color='r')
-    plt.plot(mus[:,0,3,0], mus[:,0,3,1], color='r')
-
-    # 2nd model
-    # green = state 1
-    plt.plot(mus[:,1,0,0], mus[:,1,0,1], color='g')
-    plt.plot(mus[:,1,1,0], mus[:,1,1,1], color='g')
-    # black = state 2
-    plt.plot(mus[:,1,2,0], mus[:,1,2,1], color='k')
-    plt.plot(mus[:,1,3,0], mus[:,1,3,1], color='k')
-
-
+    plt.plot(mus[:,0,1,0], mus[:,0,1,1], color='r')
     plt.show()
 
 

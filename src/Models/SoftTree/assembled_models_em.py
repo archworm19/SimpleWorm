@@ -164,7 +164,7 @@ class GMMforestEM(AModelEM):
         fprobs = gprobs * forest_probs
 
         # normalize --> posterior:
-        return tf.stop_gradient(tf.math.divide(fprobs, tf.sum(fprobs, axis=-1, keepdims=True)))
+        return tf.stop_gradient(tf.math.divide(fprobs, tf.reduce_sum(fprobs, axis=-1, keepdims=True)))
 
 
     def _loss_samples_noreg(self, x, y, latent_probs):
@@ -229,7 +229,8 @@ class GMMforestEM(AModelEM):
             tf.tensor: combined loss; scalar
         """
         # prediction loss full:
-        pred_loss_full, forest_pred = tf.expand_dims(data_weights, 2) * self._loss_samples_noreg(x, y, tf.stop_gradient(latent_probs))
+        pred_loss_full, forest_pred = self._loss_samples_noreg(x, y, tf.stop_gradient(latent_probs))
+        pred_loss_full = tf.expand_dims(data_weights, 2) * pred_loss_full
         pred_loss = tf.reduce_sum(pred_loss_full)
 
         return (pred_loss + 
