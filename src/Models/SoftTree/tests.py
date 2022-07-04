@@ -294,7 +294,6 @@ def test_GMMForestEM_simplefit():
     # model 
     plt.plot(mus[:,0,0,0], mus[:,0,0,1], color='b')
     plt.plot(mus[:,0,1,0], mus[:,0,1,1], color='r')
-    plt.show()
 
 
     # repeat but deterministic
@@ -309,6 +308,9 @@ def test_GMMForestEM_simplefit():
     # EM
     optimizer = Adam(0.1)
     mus, losses = _em_helper(model, optimizer, x, y, data_weights, num_epoch=100)
+
+    print('soft forest output?')
+    print(model.soft_forest.eval(x))
     
     plt.figure()
     plt.plot(losses)

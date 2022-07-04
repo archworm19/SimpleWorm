@@ -10,6 +10,9 @@ from Models.SoftTree.decoders import GaussFull
 from Models.SoftTree.objective_funcs import forest_loss, spread_loss
 
 
+# TODO: this should be moved over to new interface when possible
+
+
 class AModelEM(abc.ABC):
     # Assembeled Model interface
     # NOTE: EM framwork --> loss funcs will need latent state probs
