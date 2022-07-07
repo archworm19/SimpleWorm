@@ -2,6 +2,11 @@
     Useful objective functions
     > those defined here will be used by assembled_models
 
+    Key Concept: parallel dimensions vs. reduction dimensions
+    > reduction operations occur across reduction dimensions
+    > remaining dims are [batch_size] + [reduction dimensions]
+    > reduction dimensions should be specified in init methods
+
 """
 import abc
 from typing import List
@@ -17,24 +22,76 @@ class ObjFunc(abc.ABC):
 
         Args:
             predictions (tf.tensor): predictions
-            y (tf.tensor): target
+            y (tf.Tensor): truths = one-hot vector represented by indices
+                batch_size
 
         Returns:
-            tf.tensor: batch_size x num_model
+            tf.tensor: batch_size x parallel_dimensions ...
         """
         pass
 
 
 # TODO: binary classification loss
+class BinaryLoss(ObjFunc):
+
+    def __init__(self, total_dims: int):
+        """
+        don't really need total_dims but maybe useful later?
+        Assumes no reduction dim ~ already done"""
+        self.total_dims = total_dims
+
+    # TODO: adapt to work for tensor
+    # ... relatively easy if know total dims...
+    def loss_sample(self, predictions: tf.Tensor, y: bool):
+        """binary cross-entropy loss using sigmoid function
+        p = exp(pred) / (exp(pred) + 1)
+        x-entropy = y log p + (1 - y) log (1 - p)
+        > log p = pred - log(exp(pred) + 1)
+        > log(1-p) = log[ exp(pred) + 1 - exp(pred) / (exp(pred) + 1)]
+        = log [1 / (exp(pred) + 1)] = -log(exp(pred) + 1)
+        in sum:
+        y [pred - log(exp(pred) + 1)] - (1 - y)log(exp(pred) + 1)
+        K = log exp(pred) + 1
+        --> y pred - y K - K + yK = y pred - K
+        = y pred - log(exp(pred) + 1)
+        ... same as multinomial but 1 for off logit
+
+        Args:
+            predictions (tf.Tensor): prediction logits
+            y (bool): target
+
+        Returns:
+            tf.Tensor: num_parallel_dims ...
+        """
+        yint = y * 1
+        K = tf.math.log(tf.math.exp(predictions) + 1)
+        yp = yint * predictions
+        log_like = yp - K
+        return -1 * log_like
+
 
 class MultinomialLoss(ObjFunc):
 
-    def __init__(self, num_class: int):
-        self.num_class = num_class
+    def __init__(self, class_dim: int, total_dims: int):
+        """
+        class_dim = classification dimension = specifies
+            dimension containing classes = reduction dimension
+        total_dims = total number of dimensions including batch dimension"""
+        self.class_dim = class_dim
+        # slicing: beginning tensor
+        self.begin_tensor = tf.zeros([total_dims], tf.int32)
+        # slicing: length tensor
+        lt = [-1 for _ in range(total_dims)]
+        lt[class_dim] = 1
+        self.len_tensor = tf.constant(lt, tf.int32)
+        # slicing: begin mask tensor:
+        bmt = [0 for _ in range(total_dims)]
+        bmt[class_dim] = 1
+        self.begin_mask = tf.constant(bmt, tf.int32)
 
-    def loss_sample(self, predictions, y):
+    def loss_sample(self, predictions: tf.Tensor, y: tf.Tensor):
         """multinomial loss for each sample, model combination
-        Multinomial loss = 
+        Multinomial log-likelihood = 
             sum_i [ y_i * log pred_i]
             where y = one-hot vector
         Softmax construction:
@@ -47,18 +104,31 @@ class MultinomialLoss(ObjFunc):
             ... assuming y_i is one-hot vector
 
         Args:
-            predictions (tf.tensor): predictions logits
-                batch_size x num_model x 
-                TODO: should we include num_state here? probs
-            y (tf.tensor): truths
-                programmed as one-hot vector
+            predictions (tf.Tensor): predictions logits
+                batch_size x ...
+                where class_dim specifies classification dimension idx
+            y (tf.Tensor): truths = one-hot vector represented by indices
+                batch_size
 
         Returns:
-            tf.tensor: batch_size x num_model
+            tf.Tensor: num_parallel_dims ...
         """
-        # TODO: finish
+        # TODO: slice operation is more complex now! with batches
+        # HOW? for each batch --> slice a different section
+        # ... sounds like a job for gather_nd?
+        # TODO: pretty sure just tf.gather_nd(predictions, reshape(y, (-1,1)) but need to mess around with it
+
+        kx = tf.math.log(tf.reduce_sum(tf.math.exp(predictions), axis=self.class_dim))
+        # use slicing to get correct dim:
+        begin_local = self.begin_tensor + self.begin_mask * y
+        pred_i = tf.reduce_sum(tf.slice(predictions, begin_local, self.len_tensor), axis=self.class_dim)
+        # log likelihood
+        log_like = pred_i - kx
+        # negate for loss
+        return -1 * log_like
 
 
+# TODO: make this work for new, more general system
 class QuantileLoss(ObjFunc):
 
     def __init__(self, taus):
@@ -153,3 +223,20 @@ def spread_loss(ref_layers: List[LayerIface]):
     """
     sp_errs = [l.spread_error() for l in ref_layers]
     return tf.add_n(sp_errs)
+
+
+if __name__ == "__main__":
+    # TODO: move this to test file
+    import numpy as np
+    ar_np = np.zeros((3, 2, 4))
+    # TESTING: class 0 --> loss to 0
+    ar_np[1, 1, 0] = 100
+    # TESTING: class 1 --> huge loss
+    ar_np[2, 1, 1] = 100
+    ar = tf.constant(ar_np)
+    ML = MultinomialLoss(2, 3)
+    print(ML.loss_sample(ar, 0))
+
+    BL = BinaryLoss(3)
+    # if use ar again with this dude --> classes = hidden 4th dim
+    #print(BL.loss_sample(ar, ))
