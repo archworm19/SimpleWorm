@@ -116,17 +116,27 @@ class MultinomialLoss(ObjFunc):
         return -1 * log_like
 
 
-# TODO: make this work for new, more general system
 class QuantileLoss(ObjFunc):
 
-    def __init__(self, taus):
+    def __init__(self, total_dims: int, tau_dim: int, taus: tf.Tensor):
         """
-        taus (tf.tensor): taus define the quantile
+        total_dims includes batch_dim
+        tau_dim = dimension containing prediction for each quantile
+        taus (tf.Tensor): taus define the quantile
+            must be between 0 and 1, non-inclusive
             num_quantile
         """
         self.taus = taus
+        self.total_dims = total_dims
+        assert(np.all(taus.numpy() > 0.)), "illegal taus low"
+        assert(np.all(taus.numpy() < 1.)), "illegal taus hi"
+        self.new_yshape = [-1] + [1 for _ in range(total_dims-1)]
+        # reshape taus:
+        new_taushape = [1 for _ in range(total_dims)]
+        new_taushape[tau_dim] = len(taus)
+        self.taus_shaped = tf.reshape(self.taus, new_taushape)
 
-    def loss_sample(self, predictions, y):
+    def loss_sample(self, predictions: tf.Tensor, y: tf.Tensor):
         """Quantile loss = pinball loss
         = [ (tau - 1) sum_[yi < q] (yi - q)
             + tau sum_[yi >= q] (yi - q)]
@@ -136,33 +146,31 @@ class QuantileLoss(ObjFunc):
 
         Args:
             predictions (tf.tensor): predictions
-                batch_size x num_model x num_quantile
+                batch_size x ... x num_quantile x ...
             y (tf.tensor): truths
                 batch_size
                 NOTE: quantile_loss is only defined for
                     scalar truths/predictions
 
         Returns:
-            tf.tensor: batch_size x num_model
+            tf.tensor: quantile loss
+                shape matches predictions
         """
         # dt = (y_i - q)
         # --> batch_size x num_model x num_quantile
-        dt = tf.reshape(y, [-1, 1, 1]) - predictions
-
-        # reshape taus:
-        re_taus = tf.reshape(self.taus, [1, 1, -1])
+        dt = tf.reshape(y, self.new_yshape) - predictions
 
         # left side = (tau - 1) terms
-        left = ((re_taus - 1) *
-                tf.stop_gradient(dt < 0) *
+        left = ((self.taus_shaped - 1) *
+                tf.stop_gradient(tf.cast(dt < 0, predictions.dtype)) *
                 dt)
 
         # right side = tau terms
-        right = (re_taus *
-                tf.stop_gradient(dt >= 0) *
+        right = (self.taus_shaped *
+                tf.stop_gradient(tf.cast(dt >= 0, predictions.dtype)) *
                 dt)
 
-        return tf.reduce_sum(left + right, axis=-1)
+        return left + right
 
 
 # TODO: move this to SoftForest --> make it fulfill model interfaces
@@ -244,3 +252,11 @@ if __name__ == "__main__":
     print(truths)
     BL = BinaryLoss(2)
     print(BL.loss_sample(preds, truths))
+
+    # quantile loss testing
+    preds_np = np.ones((5, 2, 3))
+    preds = tf.constant(preds_np, tf.float32)
+    truths = tf.constant(np.linspace(0.0, 2.0, 5), tf.float32)
+    taus = tf.constant([.1, .5, .9])
+    QL = QuantileLoss(3, 2, taus)
+    print(QL.loss_sample(preds, truths))
