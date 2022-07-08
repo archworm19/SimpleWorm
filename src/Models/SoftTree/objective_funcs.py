@@ -31,18 +31,17 @@ class ObjFunc(abc.ABC):
         pass
 
 
-# TODO: binary classification loss
 class BinaryLoss(ObjFunc):
 
     def __init__(self, total_dims: int):
         """
         don't really need total_dims but maybe useful later?
-        Assumes no reduction dim ~ already done"""
+        Assumes no reduction dim ~ already done
+        total_dims should include batch dimension"""
         self.total_dims = total_dims
+        self.new_shape = [-1] + [1 for _ in range(total_dims-1)]
 
-    # TODO: adapt to work for tensor
-    # ... relatively easy if know total dims...
-    def loss_sample(self, predictions: tf.Tensor, y: bool):
+    def loss_sample(self, predictions: tf.Tensor, y: tf.Tensor):
         """binary cross-entropy loss using sigmoid function
         p = exp(pred) / (exp(pred) + 1)
         x-entropy = y log p + (1 - y) log (1 - p)
@@ -58,36 +57,29 @@ class BinaryLoss(ObjFunc):
 
         Args:
             predictions (tf.Tensor): prediction logits
-            y (bool): target
+            y (tf.Tensor): binary/boolean tensor
 
         Returns:
             tf.Tensor: num_parallel_dims ...
         """
-        yint = y * 1
+        # reshape y:
+        y2 = tf.reshape(y, self.new_shape)
+        # norm term = logsumexp
         K = tf.math.log(tf.math.exp(predictions) + 1)
-        yp = yint * predictions
+        # primary term
+        yp = y2 * predictions
         log_like = yp - K
         return -1 * log_like
 
 
 class MultinomialLoss(ObjFunc):
 
-    def __init__(self, class_dim: int, total_dims: int):
+    def __init__(self, class_dim: int):
         """
         class_dim = classification dimension = specifies
             dimension containing classes = reduction dimension
         total_dims = total number of dimensions including batch dimension"""
         self.class_dim = class_dim
-        # slicing: beginning tensor
-        self.begin_tensor = tf.zeros([total_dims], tf.int32)
-        # slicing: length tensor
-        lt = [-1 for _ in range(total_dims)]
-        lt[class_dim] = 1
-        self.len_tensor = tf.constant(lt, tf.int32)
-        # slicing: begin mask tensor:
-        bmt = [0 for _ in range(total_dims)]
-        bmt[class_dim] = 1
-        self.begin_mask = tf.constant(bmt, tf.int32)
 
     def loss_sample(self, predictions: tf.Tensor, y: tf.Tensor):
         """multinomial loss for each sample, model combination
@@ -107,21 +99,17 @@ class MultinomialLoss(ObjFunc):
             predictions (tf.Tensor): predictions logits
                 batch_size x ...
                 where class_dim specifies classification dimension idx
-            y (tf.Tensor): truths = one-hot vector represented by indices
+            y (tf.Tensor): truths = tensor of indices (index of correct class)
                 batch_size
 
         Returns:
             tf.Tensor: num_parallel_dims ...
         """
-        # TODO: slice operation is more complex now! with batches
-        # HOW? for each batch --> slice a different section
-        # ... sounds like a job for gather_nd?
-        # TODO: pretty sure just tf.gather_nd(predictions, reshape(y, (-1,1)) but need to mess around with it
-
+        # norm term
         kx = tf.math.log(tf.reduce_sum(tf.math.exp(predictions), axis=self.class_dim))
-        # use slicing to get correct dim:
-        begin_local = self.begin_tensor + self.begin_mask * y
-        pred_i = tf.reduce_sum(tf.slice(predictions, begin_local, self.len_tensor), axis=self.class_dim)
+        # gather the correct dimension (and reduce)
+        pred_i = tf.reduce_sum(tf.gather(predictions, tf.reshape(y, [-1,1]), axis=self.class_dim, batch_dims=1),
+                               axis=self.class_dim)
         # log likelihood
         log_like = pred_i - kx
         # negate for loss
@@ -228,15 +216,31 @@ def spread_loss(ref_layers: List[LayerIface]):
 if __name__ == "__main__":
     # TODO: move this to test file
     import numpy as np
-    ar_np = np.zeros((3, 2, 4))
-    # TESTING: class 0 --> loss to 0
-    ar_np[1, 1, 0] = 100
-    # TESTING: class 1 --> huge loss
-    ar_np[2, 1, 1] = 100
-    ar = tf.constant(ar_np)
-    ML = MultinomialLoss(2, 3)
-    print(ML.loss_sample(ar, 0))
 
-    BL = BinaryLoss(3)
-    # if use ar again with this dude --> classes = hidden 4th dim
-    #print(BL.loss_sample(ar, ))
+    # predictions ~ 4 classes (3 batches, 2 parallel models)
+    ar_np = np.ones((4, 2, 4))
+    # each model predicts 0,1,2,3 in order
+    ar_np[0,:,0] = 10
+    ar_np[1,:,1] = 10
+    ar_np[2,:,2] = 10
+    ar_np[3,:,3] = 10
+    preds = tf.constant(ar_np, dtype=tf.float32)
+    # truths: first 1st and last correct
+    truths_np = np.zeros((4,))
+    truths_np[2:] = 3
+    truths = tf.constant(truths_np, dtype=tf.int32)
+    ML = MultinomialLoss(2)
+    print(ML.loss_sample(preds, truths))
+
+    # repeat for binary loss
+    ar_np = np.ones((4, 2)) * -5.
+    # class predictions = 0, 0, 1, 1 for both models
+    ar_np[2:,:] = 5.
+    # truths = 0, 1, 0, 1 (ends correct again)
+    truths_np = np.array([0, 1, 0, 1])
+    preds = tf.constant(ar_np, tf.float32)
+    truths = tf.constant(truths_np, tf.float32)  # TODO: boolean type?
+    print(preds)
+    print(truths)
+    BL = BinaryLoss(2)
+    print(BL.loss_sample(preds, truths))
