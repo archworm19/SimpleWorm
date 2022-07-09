@@ -3,6 +3,8 @@
     = common model configurations
 """
 import abc
+import tensorflow as tf
+from typing import Union, List
 
 
 class GateSubModel(abc.ABC):
@@ -16,17 +18,17 @@ class GateSubModel(abc.ABC):
         """
         pass
 
-    def get_state_probs(self, x):
+    def get_state_probs(self, x: Union[tf.Tensor, List[tf.Tensor]]):
         """Get State probabilities
 
         Args:
-            x (tf.tensor): input
+            x (Union[tf.Tensor, List[tf.Tensor]]): input
                 batch_size x x1 x x2 x ...
                 where x1, x2, ... match layer factory
                     used to create this model 
         
         Returns:
-            tf.tensor: state probabilities for batch, model combo
+            tf.Tensor: state probabilities for batch, model combo
                 batch_size x num_model x num_state
         """
         pass
@@ -39,17 +41,21 @@ class GateSubModel(abc.ABC):
         """
         pass
 
-    def regularization_loss(self, x):
-        """Return the regularization loss
-
-        Args:
-            x (tf.tensor): input
-                batch_size x x1 x x2 x ...
-                where x1, x2, ... match layer factory
-                    used to create this model 
+    def regularization_loss(self,
+                            x: Union[tf.Tensor, List[tf.Tensor]],
+                            data_weights: tf.Tensor,
+                            reg_epoch_scale: float):
+        """Regularization loss
         
+        Args:
+            x (Union[tf.Tensor, List[tf.Tensor]]): input
+            data_weights (tf.Tensor): weights on the data points
+                batch_size x num_model
+            reg_epoch_scale (float): how much to scale regularization
+                by as a function of epoch == f(temperature)
+
         Returns:
-            tf.tensor: scalar
+            scalar: sum loss across batch/models
         """
         pass
 
@@ -86,17 +92,21 @@ class PredSubModel(abc.ABC):
         """
         pass
 
-    def regularization_loss(self, x):
-        """Return the regularization loss
-
-        Args:
-            x (tf.tensor): input
-                batch_size x x1 x x2 x ...
-                where x1, x2, ... match layer factory
-                    used to create this model 
+    def regularization_loss(self,
+                            x: Union[tf.Tensor, List[tf.Tensor]],
+                            data_weights: tf.Tensor,
+                            reg_epoch_scale: float):
+        """Regularization loss
         
+        Args:
+            x (Union[tf.Tensor, List[tf.Tensor]]): input
+            data_weights (tf.Tensor): weights on the data points
+                batch_size x num_model
+            reg_epoch_scale (float): how much to scale regularization
+                by as a function of epoch == f(temperature)
+
         Returns:
-            tf.tensor: scalar
+            scalar: sum loss across batch/models
         """
         pass
 
