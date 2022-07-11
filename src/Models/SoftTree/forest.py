@@ -100,7 +100,10 @@ class SoftForest(GateSubModel):
         self.spread_penalty = spread_penalty
         self.all_nodes = []
         _get_all_nodes(root_node, self.all_nodes)
-    
+
+    def get_state_probs(self, x: Union[tf.Tensor, List[tf.Tensor]]):
+        return self.eval(x)
+
     def eval(self, x: Union[tf.Tensor, List[tf.Tensor]]):
         """evaluate the whole tree
 
@@ -230,7 +233,9 @@ class SoftForest(GateSubModel):
 
 
 def build_forest(depth: int,
-                 layer_factory: LayerFactoryIface):
+                 layer_factory: LayerFactoryIface,
+                 forest_penalty: float,
+                 spread_penalty: float):
     """Build a forest
 
     Args:
@@ -238,6 +243,13 @@ def build_forest(depth: int,
             depth = 1 means just the root node
         layer_factory (LayerFactoryIface) layer factory
             to be used for each layer
+        forest_penalty (float): regularization penalty
+            for forest state entropy
+            stronger reg --> 'less sure' state predictions
+        spread_penalty (float): regularization penalty
+            for each layer in soft forest
+            stronger reg --> contraction of sub-models
+                to shared model
     
     Returns:
         SoftForest object
@@ -267,4 +279,4 @@ def build_forest(depth: int,
             parent.add_children(children)
             next_gen.extend(children)
         clevl = next_gen
-    return SoftForest(root_node), width, layer_refs
+    return SoftForest(root_node, forest_penalty, spread_penalty), width, layer_refs

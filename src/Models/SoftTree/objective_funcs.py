@@ -17,13 +17,12 @@ from Models.SoftTree.decoders import log_prob_iface
 
 class ObjFunc(abc.ABC):
     # rely on specific model types to reduce across samples
-    def loss_sample(self, predictions, y):
+    def loss_sample(self, predictions: tf.Tensor, y: tf.Tensor):
         """loss for each model, sample combination
 
         Args:
-            predictions (tf.tensor): predictions
-            y (tf.Tensor): truths = one-hot vector represented by indices
-                batch_size
+            predictions (tf.Tensor): predictions
+            y (tf.Tensor): truths
 
         Returns:
             tf.tensor: batch_size x parallel_dimensions ...
@@ -128,8 +127,8 @@ class QuantileLoss(ObjFunc):
         """
         self.taus = taus
         self.total_dims = total_dims
-        assert(np.all(taus.numpy() > 0.)), "illegal taus low"
-        assert(np.all(taus.numpy() < 1.)), "illegal taus hi"
+        assert(tf.reduce_all(taus > 0.)), "illegal taus low"
+        assert(tf.reduce_all(taus < 1.)), "illegal taus hi"
         self.new_yshape = [-1] + [1 for _ in range(total_dims-1)]
         # reshape taus:
         new_taushape = [1 for _ in range(total_dims)]
@@ -171,44 +170,3 @@ class QuantileLoss(ObjFunc):
                 dt)
 
         return left + right
-
-
-if __name__ == "__main__":
-    # TODO: move this to test file
-    import numpy as np
-
-    # predictions ~ 4 classes (3 batches, 2 parallel models)
-    ar_np = np.ones((4, 2, 4))
-    # each model predicts 0,1,2,3 in order
-    ar_np[0,:,0] = 10
-    ar_np[1,:,1] = 10
-    ar_np[2,:,2] = 10
-    ar_np[3,:,3] = 10
-    preds = tf.constant(ar_np, dtype=tf.float32)
-    # truths: first 1st and last correct
-    truths_np = np.zeros((4,))
-    truths_np[2:] = 3
-    truths = tf.constant(truths_np, dtype=tf.int32)
-    ML = MultinomialLoss(2)
-    print(ML.loss_sample(preds, truths))
-
-    # repeat for binary loss
-    ar_np = np.ones((4, 2)) * -5.
-    # class predictions = 0, 0, 1, 1 for both models
-    ar_np[2:,:] = 5.
-    # truths = 0, 1, 0, 1 (ends correct again)
-    truths_np = np.array([0, 1, 0, 1])
-    preds = tf.constant(ar_np, tf.float32)
-    truths = tf.constant(truths_np, tf.float32)  # TODO: boolean type?
-    print(preds)
-    print(truths)
-    BL = BinaryLoss(2)
-    print(BL.loss_sample(preds, truths))
-
-    # quantile loss testing
-    preds_np = np.ones((5, 2, 3))
-    preds = tf.constant(preds_np, tf.float32)
-    truths = tf.constant(np.linspace(0.0, 2.0, 5), tf.float32)
-    taus = tf.constant([.1, .5, .9])
-    QL = QuantileLoss(3, 2, taus)
-    print(QL.loss_sample(preds, truths))

@@ -3,9 +3,9 @@ from typing import List
 from Models.SoftTree import layers
 from Models.SoftTree import forest
 from Models.SoftTree import decoders
-from Models.SoftTree.assembled_models_em import GMMforestEM
-from Models.SoftTree.objective_funcs import forest_loss, spread_loss
+# from Models.SoftTree.assembled_models_em import GMMforestEM  # TODO: port to new interface
 import Models.SoftTree.train_model as train_model
+from Models.SoftTree.objective_funcs import BinaryLoss, MultinomialLoss, QuantileLoss
 import tensorflow as tf
 import numpy as np
 import numpy.random as npr
@@ -78,7 +78,7 @@ def _build_forest():
     low_dim = 4
     rng = npr.default_rng(42)
     LFLR = layers.LayerFactoryFB(num_base_models, models_per_base, xshape, width, low_dim, rng)
-    F, _, _ = forest.build_forest(depth, LFLR)
+    F, _, _ = forest.build_forest(depth, LFLR, 0., 0.)  # no reg
     return F, LFLR, depth
 
 
@@ -322,10 +322,106 @@ def test_GMMForestEM_simplefit():
     plt.show()
 
 
+def test_binaryloss_objfunc():
+    tol = 1e-4
+    # binary loss
+    ar_np = np.ones((4, 2)) * -5.
+    # class predictions = 0, 0, 1, 1 for both models
+    ar_np[2:,:] = 5.
+    # truths = 0, 1, 0, 1 (ends correct --> low error end, high error mids)
+    truths_np = np.array([0, 1, 0, 1])
+    preds = tf.constant(ar_np, tf.float32)
+    truths = tf.constant(truths_np, tf.float32)
+    BL = BinaryLoss(2)
+    bl_loss = BL.loss_sample(preds, truths)
+    assert(np.shape(bl_loss.numpy()) == (4,2))
+    targ = np.array([[.0067, .0067], [5.0067, 5.0067], [5.0067, 5.0067], [.0067, .0067]])
+    assert(np.all((bl_loss.numpy() - targ) < tol))
+
+    # compare to non-expanded formulation
+    pred_prob = tf.nn.sigmoid(preds)
+    truths_re = tf.reshape(truths, [-1,1])
+    loss_ref = -1 * (truths_re * tf.math.log(pred_prob) + (1 - truths_re) * tf.math.log(1 - pred_prob))
+    assert(np.all((bl_loss - loss_ref).numpy() < tol))
+
+
+def test_multiloss_objfunc():
+    tol = 1e-4
+    # predictions ~ 4 classes (3 batches, 2 parallel models)
+    ar_np = np.ones((4, 2, 4))
+    # each model predicts 0,1,2,3 in order
+    ar_np[0,:,0] = 10
+    ar_np[1,:,1] = 10
+    ar_np[2,:,2] = 10
+    ar_np[3,:,3] = 10
+    preds = tf.constant(ar_np, dtype=tf.float32)
+    # truths: first 1st and last correct
+    # = [0, 0, 3, 3]
+    truths_np = np.zeros((4,))
+    truths_np[2:] = 3
+    truths = tf.constant(truths_np, dtype=tf.int32)
+    ML = MultinomialLoss(2)
+    ml_loss = ML.loss_sample(preds, truths)
+    assert(np.shape(ml_loss.numpy()) == (4, 2))
+    targ = np.array([[3.7002563e-04, 3.7002563e-04], [9.0003700e+00, 9.0003700e+00],
+                     [9.0003700e+00, 9.0003700e+00], [3.7002563e-04, 3.7002563e-04]])
+    assert(np.all((ml_loss.numpy() - targ) < tol))
+
+    # compare to non-expanded formulation
+    pred_prob = tf.nn.softmax(preds, axis=-1)
+    truths_onehot = np.zeros((4, 4))
+    truths_onehot[:2, 0] = 1
+    truths_onehot[2:, -1] = 1
+    truths_onehot_tf = tf.reshape(tf.constant(truths_onehot, tf.float32), [4, 1, 4])
+    ref_err = -1 * tf.reduce_sum(truths_onehot_tf * tf.math.log(pred_prob), axis=-1)
+    assert(np.all((ml_loss - ref_err) < tol))
+
+
+def test_quantileloss_objfunc():
+    tol = 1e-4
+    # quantile loss testing
+    preds_np = np.ones((5, 2, 3))
+    preds = tf.constant(preds_np, tf.float32)
+    truths = tf.constant(np.linspace(0.0, 2.0, 5), tf.float32)
+    taus = tf.constant([.1, .5, .9])
+    QL = QuantileLoss(3, 2, taus)
+    ql_loss = QL.loss_sample(preds, truths)
+    assert(np.shape(ql_loss.numpy()) == (5, 2, 3))
+    targ = [[[0.9, 0.5, 0.10000002],
+             [0.9, 0.5, 0.10000002]],
+            [[0.45, 0.25, 0.05000001],
+             [0.45, 0.25, 0.05000001]],
+            [[0.,  0.,  0., ],
+             [0.,  0.,  0., ]],
+            [[0.05, 0.25, 0.45],
+            [0.05, 0.25, 0.45]],
+            [[0.1, 0.5, 0.9, ],
+            [0.1, 0.5, 0.9, ]]]
+    assert(np.all((ql_loss - targ) < tol))
+
+    # more easily interpretable test?
+    # ensure loss is minimized for correct quantile!
+    truths = np.arange(0, 100)  # quantile numbs = 10, 50, 90
+    best_preds = np.array([[[10, 50, 90]]])
+    best_preds = np.tile(best_preds, (100, 1, 1))
+    for scale_direction in [2, -2]:
+        lozz = []
+        for i in range(5):
+            mut_preds = best_preds + scale_direction * i * np.ones((100, 1, 1))  # shifting preds test
+            mut_loss = tf.reduce_sum(QL.loss_sample(tf.constant(mut_preds, tf.float32),
+                                                    tf.constant(truths, tf.float32)))
+            lozz.append(mut_loss.numpy())
+        assert(np.all(np.diff(np.array(lozz)) >= 0))
+
+
+
 if __name__ == '__main__':
     test_layers()
     test_forest_build()
     test_eval_forest()
     test_gauss()
-    test_GMMForestEM()
-    test_GMMForestEM_simplefit()
+    #test_GMMForestEM()
+    #test_GMMForestEM_simplefit()
+    test_binaryloss_objfunc()
+    test_multiloss_objfunc()
+    test_quantileloss_objfunc()
