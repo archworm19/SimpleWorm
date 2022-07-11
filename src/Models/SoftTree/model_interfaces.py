@@ -29,7 +29,7 @@ class GateSubModel(abc.ABC):
         
         Returns:
             tf.Tensor: state probabilities for batch, model combo
-                batch_size x num_model x num_state
+                batch_size x ... x num_state x ...
         """
         pass
 
@@ -80,7 +80,7 @@ class PredSubModel(abc.ABC):
         
         Returns:
             tf.tensor: predictions
-                batch_size x num_model x num_state x num_pred
+                batch_size x ... x prediction dimension size x ...
         """
         pass
 
@@ -101,7 +101,8 @@ class PredSubModel(abc.ABC):
         Args:
             x (Union[tf.Tensor, List[tf.Tensor]]): input
             data_weights (tf.Tensor): weights on the data points
-                batch_size x num_model
+                batch_size x ...
+                often batch_size x num_parallel_model
             reg_epoch_scale (float): how much to scale regularization
                 by as a function of epoch == f(temperature)
 
@@ -113,15 +114,17 @@ class PredSubModel(abc.ABC):
 
 class AModel(abc.ABC):
     # Assembeled Model interface
-    def loss(self, x, y, data_weights):
+    def loss(self, x: Union[tf.Tensor, List[tf.Tensor]], y: tf.Tensor, data_weights: tf.Tensor):
         """The loss function
 
         Args:
-            x (tf.tensor or List[tf.tensor]): inputs
+            x (Union[tf.Tensor, List[tf.Tensor]]): inputs
                 type/shape must match what is specified by layer/layer factory
-            y (tf.tensor): target/truth ~ batch_size x 
+            y (tf.Tensor): target/truth
+                batch_size
             data_weights (tf.tensor): weights on the data points
-                batch_size x num_model
+                batch_size x ...
+                often batch_size x num_parallel_model
         
         Returns:
             tf.tensor: combined loss; scalar
@@ -132,34 +135,37 @@ class AModel(abc.ABC):
         """Get the trainable weights
 
         Returns:
-            List[tf.tensor]
+            List[tf.Tensor]
         """
         pass
 
-    def loss_samples_noreg(self, x, y):
+    def loss_samples_noreg(self, x: Union[tf.Tensor, List[tf.Tensor]], y: tf.Tensor):
         """Loss for each sample in batch
 
         Args:
-            x (tf.tensor or List[tf.tensor]): inputs
+            x (Union[tf.Tensor, List[tf.Tensor]]): inputs
                 type/shape must match what is specified by layer/layer factory
-            y (tf.tensor): target/truth ~ batch_size x 
+            y (tf.Tensor): target/truth
+                batch_size
 
         Returns:
-            tf.tensor: combined loss
-                batch_size x num_model
+            tf.Tensor: combined loss
+                batch_size x ...
+                often times: batch_size x num_parallel_models
         """
         pass
 
-    def get_preds(self, x):
+    def get_preds(self, x: Union[tf.Tensor, List[tf.Tensor]]):
         """Predictions
 
         Args:
-            x (tf.tensor or List[tf.tensor]): inputs
+            x (Union[tf.Tensor, List[tf.Tensor]]): inputs
                 type/shape must match what is specified by layer/layer factory
         
         Returns:
-            tf.tensor: predictions
-                batch_size x num_model x ...
+            tf.Tensor: predictions
+                batch_size x ...
+                often times: batch_size x num_parallel_models
         """
         pass
 
@@ -171,38 +177,50 @@ class AModelEM(abc.ABC):
     # Assembeled Model interface
     # NOTE: EM framwork --> loss funcs will need latent state probs
 
-    def latent_posterior(self, x, y):
+    def latent_posterior(self, x: Union[tf.Tensor, List[tf.Tensor]], y: tf.Tensor):
         """Calculate the posterior probabilities
         of the latent state ~ p(Z | X, theta_t)
         used by the E step in expectation maximization
 
         Args:
-            x (tf.tensor or List[tf.tensor]): inputs
+            x (Union[tf.Tensor, List[tf.Tensor]]): inputs
                 type/shape must match what is specified by layer/layer factory
-            y (tf.tensor): target/truth ~ batch_size x 
+            y (tf.Tensor): target/truth ~ batch_size x 
         
         Returns:
-            tf.tensor: combined loss; scalar
+            tf.Tensor: posterior probabilties for each latent state z
+                batch_size x ... x num_z_dimensions
+                Common example: trying to solve a GMM in N different subspaces
+                    number of mixtures = M --> latents in half-bayesian formulation
+                    = categorical distro --> z = i --> observation from the ith gaussian
+                    this will return batch_size x num_state x num_gaussians_per_state
+                    = batch_size x N x M
         """
         pass
 
-    def loss(self, x, y, data_weights, latent_probs):
+    def loss(self, x: Union[tf.Tensor, List[tf.Tensor]], y: tf.Tensor,
+                   data_weights: tf.Tensor, latent_probs: tf.Tensor):
         """The loss function
         Used by the M-step of expectation maximization
         Includes regularization loss
 
         Args:
-            x (tf.tensor or List[tf.tensor]): inputs
+            x (Union[tf.Tensor, List[tf.Tensor]]): inputs
                 type/shape must match what is specified by layer/layer factory
-            y (tf.tensor): target/truth ~ batch_size x 
-            data_weights (tf.tensor): weights on the data points
-                batch_size x num_model
-            latent_probs (tf.tensor): latent posteriors calculated from
+            y (tf.Tensor): target/truth
+                batch_size
+            data_weights (tf.Tensor): weights on the data points
+                batch_size x ...
+                often batch_size x num_parallel_model
+            latent_probs (tf.Tensor): latent posteriors calculated from
                 latent_posterior method ~ treated as static here
-                batch_size x num_model x num_state x ...
+                batch_size x ... x num_z_state
+                often batch_size x num_parallel_model x num_state x num_z_state
+                must be normalized across z states (within other states if applicable)
         
         Returns:
-            tf.tensor: combined loss; scalar
+            tf.Tensor: combined loss; scalar
+                includes regularization penalties
         """
         pass
 
@@ -210,24 +228,32 @@ class AModelEM(abc.ABC):
         """Get the trainable weights
 
         Returns:
-            List[tf.tensor]
+            List[tf.Tensor]
         """
         pass
 
-    def loss_samples_noreg(self, x, y, latent_probs):
+    def loss_samples_noreg(self, x: Union[tf.Tensor, List[tf.Tensor]],
+                                 y: tf.Tensor, latent_probs: tf.Tensor):
         """Loss for each sample in batch
         with no regularization
 
         Args:
-            x (tf.tensor or List[tf.tensor]): inputs
+            x (Union[tf.Tensor, List[tf.Tensor]]): inputs
                 type/shape must match what is specified by layer/layer factory
-            y (tf.tensor): target/truth ~ batch_size x dim of decoder domain
-            latent_probs (tf.tensor): latent posteriors calculated from
+            y (tf.Tensor): target/truth
+                batch_size
+            data_weights (tf.Tensor): weights on the data points
+                batch_size x ...
+                often batch_size x num_parallel_model
+            latent_probs (tf.Tensor): latent posteriors calculated from
                 latent_posterior method ~ treated as static here
-                batch_size x num_model x num_state x num_mix
+                batch_size x ... x num_z_state
+                often batch_size x num_parallel_model x num_state x num_z_state
+                must be normalized across z states (within other states if applicable)
 
         Returns:
-            tf.tensor: loss without regularization
-                batch_size x num_model x num_state x num_mix
+            tf.Tensor: loss without regularization
+                batch_size x ... x num_z_state x ...
+                often: batch_size x num_parallel_model x num_state x num_z_state
         """
         pass

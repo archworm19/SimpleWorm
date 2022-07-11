@@ -3,10 +3,7 @@
     = common model configurations
 """
 import tensorflow as tf
-import numpy.random as npr
-from Models.SoftTree.layers import LayerFactoryIface, var_construct
-from Models.SoftTree.forest import build_forest
-from Models.SoftTree.decoders import GaussFull
+from typing import List, Union
 from Models.SoftTree.model_interfaces import GateSubModel, PredSubModel, AModel
 
 
@@ -17,14 +14,14 @@ class GatedModel(AModel):
         self.pred_model = pred_model
         assert(gating_model.get_num_state() == pred_model.get_num_state()), "state mismatch"
 
-    def get_preds(self, x):
+    def get_preds(self, x: Union[tf.Tensor, List[tf.Tensor]]):
         """Get predictions
 
         Args:
-            x (tf.tensor): input
+            x (Union[tf.Tensor, List[tf.Tensor]]): input
 
         Returns:
-            tf.tensor: gated predictions
+            tf.Tensor: gated predictions
                 batch_size x num_model x num_state x num_pred
         """
         # gating probs = batch_size x num_model x num_state
