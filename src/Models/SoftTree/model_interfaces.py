@@ -69,11 +69,11 @@ class PredSubModel(abc.ABC):
         """
         pass
 
-    def get_preds(self, x):
+    def get_preds(self, x: List[tf.Tensor]):
         """Get predictions
 
         Args:
-            x (tf.tensor): input
+            x (List[tf.Tensor]): input
                 batch_size x x1 x x2 x ...
                 where x1, x2, ... match layer factory
                     used to create this model 

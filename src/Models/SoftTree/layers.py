@@ -37,7 +37,7 @@ class LayerIface(abc.ABC):
         
         Returns:
             tf.Tensor: reduced tensor
-                batches x parallel_dim1 x parallel_dim2 x ... x width
+                batches x parallel_models x width
         """
         pass
 
@@ -59,6 +59,14 @@ class LayerIface(abc.ABC):
         
         Returns:
             List[tf.tensor]
+        """
+        pass
+
+    def get_num_parallel_models(self):
+        """Get the number of parallel models
+
+        Returns:
+            int: number of parallel models
         """
         pass
 
@@ -110,6 +118,14 @@ class LayerBasic(LayerIface):
         # first 3 dims are batch_size, parallel models, width
         # --> should not be reduced
         self.reduce_dims = [3 + i for i in range(len(xshape))]
+
+    def get_num_parallel_models(self):
+        """Get the number of parallel models
+
+        Returns:
+            int: number of parallel models
+        """
+        return self.base_models * self.models_per_base
 
     def _get_wop(self):
         """Get operable W tensor; W = training weights
@@ -225,6 +241,14 @@ class LayerFB(LayerIface):
         self.reduce_dims = [3 + i for i in range(len(xshape))]
         self.train_vars.extend([self.w_spread, self.offset])
 
+    def get_num_parallel_models(self):
+        """Get the number of parallel models
+
+        Returns:
+            int: number of parallel models
+        """
+        return self.base_models * self.models_per_base
+
     def _get_wop(self):
         """Get operable W tensor; W = training weights
         Have to do this here because tensorflow defaults to eager mode
@@ -292,8 +316,21 @@ class LayerMulti(LayerIface):
         """
         self.sub_layers = sub_layers
         self.width = sub_layers[0].get_width()
+        # width check
         for sl in sub_layers:
             assert(sl.get_width() == self.width)
+        # models check
+        self.num_models = sub_layers[0].get_num_parallel_models()
+        for sl in sub_layers:
+            assert(sl.get_num_parallel_models() == self.num_models)
+
+    def get_num_parallel_models(self):
+        """Get the number of parallel models
+
+        Returns:
+            int: number of parallel models
+        """
+        return self.num_models
 
     def get_width(self):
         return self.width
