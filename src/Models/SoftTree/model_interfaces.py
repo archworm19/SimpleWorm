@@ -163,7 +163,7 @@ class AModel(abc.ABC):
                 type/shape must match what is specified by layer/layer factory
         
         Returns:
-            tf.Tensor: predictions
+            List[tf.Tensor]: set of predictions (strong model-dependence)
                 batch_size x ...
                 often times: batch_size x num_parallel_models
         """

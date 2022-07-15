@@ -9,10 +9,7 @@
 
 """
 import abc
-from typing import List
 import tensorflow as tf
-from Models.SoftTree.layers import LayerIface
-from Models.SoftTree.decoders import log_prob_iface
 
 
 class ObjFunc(abc.ABC):

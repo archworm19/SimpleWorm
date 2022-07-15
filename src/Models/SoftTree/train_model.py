@@ -23,6 +23,7 @@ def train_step(model: AModel, optimizer, x, y, data_weights):
     return loss
 
 
+# TODO: this needs to be generalized! = pass in a recipe, maybe
 # TODO: we maybe should include timestep identifiers
 # TODO/NOTE: this is where data ordering assumptions are applied
 def _gather_data(dat):
@@ -38,6 +39,7 @@ def train_epoch(train_dataset, model: AModel, optimizer):
         train_step(model, optimizer, x, y, data_weights)
 
 
+# TODO: needs support for temperatures
 def eval_losses(train_dataset, model: AModel):
     """Get prediction loss for each batch, model combination
 
@@ -52,11 +54,12 @@ def eval_losses(train_dataset, model: AModel):
     combo_losses = []
     for _step, dat in enumerate(train_dataset):
         x, y, data_weights = _gather_data(dat)
-        c_loss = model.loss_samples(x, y, data_weights)
+        c_loss = model.loss_samples_noreg(x, y, data_weights)
         combo_losses.append(c_loss.numpy())
     return np.vstack(combo_losses)
 
 
+# TODO: support for temperature plans
 def train(train_dataset, model: AModel, optimizer, num_epoch=3):
     """Train for a number of epochs
 

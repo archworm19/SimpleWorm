@@ -73,7 +73,26 @@ def _get_all_nodes(root_node: ForestNode, nodes: List[ForestNode]):
         return
     for ch in childz:
         _get_all_nodes(ch, nodes)
-    
+
+
+def _get_depths(root_node: ForestNode, depth: int):
+    """Get the depths to each leaf node in sub-forest
+
+    Args:
+        root_node (ForestNode): root node
+        depth (int): depth of root node
+
+    Returns:
+        List[int]: depths to each leaf
+    """
+    childz = root_node.get_children()
+    if len(childz) < 1:
+        return [depth]
+    depths = []
+    for ch in childz:
+        depths.extend(_get_depths(ch, depth+1))
+    return depths
+
 
 class SoftForest(GateSubModel):
 
@@ -100,6 +119,21 @@ class SoftForest(GateSubModel):
         self.spread_penalty = spread_penalty
         self.all_nodes = []
         _get_all_nodes(root_node, self.all_nodes)
+        # ensure they all have the same width
+        width = self.all_nodes[0].layer.get_width()
+        assert(all([width == node.layer.get_width()
+                    for node in self.all_nodes])), "constant width required"
+        # actual width will be larger due to offsetting
+        self.width = width + 1
+        # ensure constant depths:
+        depths = _get_depths(self.root_node, 1)
+        assert(all(depths[0] == dep for dep in depths)), "constant depths req"
+        # state check:
+        self.num_state = len(depths) * self.width
+        assert(self.num_state == int(self.width ** depths[0]))
+
+    def get_num_state(self):
+        return self.num_state
 
     def get_state_probs(self, x: Union[tf.Tensor, List[tf.Tensor]]):
         return self.eval(x)
