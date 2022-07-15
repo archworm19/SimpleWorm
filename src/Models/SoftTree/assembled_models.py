@@ -23,11 +23,11 @@ class GatedLossModel(AModel):
         self.obj_func = obj_func
         assert(gating_model.get_num_state() == pred_model.get_num_state()), "state mismatch"
 
-    def get_preds(self, x: Union[tf.Tensor, List[tf.Tensor]]):
+    def get_preds(self, x: List[tf.Tensor]):
         """Get predictions
 
         Args:
-            x (Union[tf.Tensor, List[tf.Tensor]]): input
+            x (List[tf.Tensor]): input
 
         Returns:
             List[tf.Tensor]: gated predictions
@@ -42,11 +42,11 @@ class GatedLossModel(AModel):
         preds = self.pred_model.get_preds(x)
         return [gates, preds]
 
-    def loss_samples_noreg(self, x: Union[tf.Tensor, List[tf.Tensor]], y: tf.Tensor):
+    def loss_samples_noreg(self, x: List[tf.Tensor], y: tf.Tensor):
         """Loss for each sample in batch
 
         Args:
-            x (Union[tf.Tensor, List[tf.Tensor]]): inputs
+            x (List[tf.Tensor]): inputs
                 type/shape must match what is specified by layer/layer factory
             y (tf.Tensor): target/truth ~ batch_size x 
 
@@ -63,12 +63,12 @@ class GatedLossModel(AModel):
         # scale losses by gating probabilities
         return gates * parallel_loss
         
-    def loss(self, x: Union[tf.Tensor, List[tf.Tensor]], y: tf.Tensor, data_weights: tf.Tensor,
+    def loss(self, x: List[tf.Tensor], y: tf.Tensor, data_weights: tf.Tensor,
                 reg_epoch_scale: float = 1.):
         """Loss from loss_samples_noreg + regularization losses
 
         Args:
-            x (Union[tf.Tensor, List[tf.Tensor]]): input
+            x (List[tf.Tensor]): input
             y (tf.Tensor): truth
             data_weights (tf.Tensor): weights on each datapoint
                 in the sample
@@ -95,11 +95,11 @@ class GatedPredModel(AModel):
         self.obj_func = obj_func
         assert(gating_model.get_num_state() == pred_model.get_num_state()), "state mismatch"
 
-    def get_preds(self, x: Union[tf.Tensor, List[tf.Tensor]]):
+    def get_preds(self, x: List[tf.Tensor]):
         """Get predictions
 
         Args:
-            x (Union[tf.Tensor, List[tf.Tensor]]): input
+            x (List[tf.Tensor]): input
 
         Returns:
             List[tf.Tensor]: gate model averaged predictions
@@ -115,11 +115,11 @@ class GatedPredModel(AModel):
                               axis=[2,3])
         return [w_ave]
 
-    def loss_samples_noreg(self, x: Union[tf.Tensor, List[tf.Tensor]], y: tf.Tensor):
+    def loss_samples_noreg(self, x: List[tf.Tensor], y: tf.Tensor):
         """Loss for each sample in batch
 
         Args:
-            x (Union[tf.Tensor, List[tf.Tensor]]): inputs
+            x (List[tf.Tensor]): inputs
                 type/shape must match what is specified by layer/layer factory
             y (tf.Tensor): target/truth ~ batch_size x 
 
@@ -135,12 +135,12 @@ class GatedPredModel(AModel):
         # scale losses by gating probabilities
         return parallel_loss
         
-    def loss(self, x: Union[tf.Tensor, List[tf.Tensor]], y: tf.Tensor, data_weights: tf.Tensor,
+    def loss(self, x: List[tf.Tensor], y: tf.Tensor, data_weights: tf.Tensor,
                 reg_epoch_scale: float = 1.):
         """Loss from loss_samples_noreg + regularization losses
 
         Args:
-            x (Union[tf.Tensor, List[tf.Tensor]]): input
+            x (List[tf.Tensor]): input
             y (tf.Tensor): truth
             data_weights (tf.Tensor): weights on each datapoint
                 in the sample

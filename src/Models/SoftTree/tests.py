@@ -27,8 +27,8 @@ def test_layers():
     layer2 = LFB.build_layer()
 
     # ensure layers are not identical == factory (not clone)
-    assert(np.sum(layer1.eval(x).numpy() != layer2.eval(x).numpy()) >= 1)
-    assert(np.shape(layer1.eval(x).numpy()) == (2, 12, 3))
+    assert(np.sum(layer1.eval([x]).numpy() != layer2.eval([x]).numpy()) >= 1)
+    assert(np.shape(layer1.eval([x]).numpy()) == (2, 12, 3))
     assert(np.shape(layer1._get_wop().numpy()) == tuple([1, num_base_model * models_per_base, width] + xshape))
     assert(np.shape(layer1.offset.numpy()) == (12, 3))
     # first 3 = batch_size, num_model, width (reduce across xshape)
@@ -39,8 +39,8 @@ def test_layers():
     LFLR = layers.LayerFactoryFB(num_base_model, models_per_base, xshape, width, low_dim, rng)
     layer3 = LFLR.build_layer()
     layer4 = LFLR.build_layer()
-    assert(np.sum(layer3.eval(x).numpy() != layer4.eval(x).numpy()) >= 1)
-    assert(np.shape(layer3.eval(x).numpy()) == (2, 12, 3))
+    assert(np.sum(layer3.eval([x]).numpy() != layer4.eval([x]).numpy()) >= 1)
+    assert(np.shape(layer3.eval([x]).numpy()) == (2, 12, 3))
     assert(np.shape(layer3.fb.numpy()) == tuple([num_base_model, 1, 1, low_dim] + xshape))
     assert(np.shape(layer3.w_shared.numpy()) == tuple([num_base_model, 1, width, low_dim]
                                                         + [1 for _ in xshape]))
@@ -60,7 +60,7 @@ def test_layers():
 
     # testing multilayer:
     multi_layer = layers.LayerMulti([layer1, layer3])
-    assert(np.shape(multi_layer.eval([x,x]).numpy()) == np.shape(layer1.eval(x).numpy()))
+    assert(np.shape(multi_layer.eval([x,x]).numpy()) == np.shape(layer1.eval([x]).numpy()))
 
 
 def _get_layer_ws(node: forest.ForestNode, w_list: List):
@@ -117,7 +117,7 @@ def test_eval_forest():
     # assuming flattened (which should _build_forest is)
     [num_models, _layer_width, dims] = w_shape
     x = tf.ones([batch_size, dims])
-    prs = F.eval(x).numpy()
+    prs = F.eval([x]).numpy()
     num_leaves = (LFLR.get_width() + 1) ** depth
     assert(np.shape(prs) == (batch_size, num_models, num_leaves))
     # check normalization:
@@ -126,14 +126,14 @@ def test_eval_forest():
     # 0 check: constant within model
     # ... models will be different due to different offsets in layers
     x = tf.zeros([batch_size, dims])
-    prs = F.eval(x).numpy()
+    prs = F.eval([x]).numpy()
     prs_mod_red = np.sum(prs, axis=1)
     for i in range(np.shape(prs_mod_red)[0]):
         assert(np.sum(prs[i] - prs[0]) < .00001)
 
     # HI check --> full offset dim should disapear
     x = tf.ones([batch_size, dims]) * 1000000
-    prs = F.eval(x).numpy()
+    prs = F.eval([x]).numpy()
     assert(np.sum(prs[:,:,-1]) < .01)
 
 

@@ -29,16 +29,15 @@ def var_construct(rng: npr.Generator, v_shape: List[int], v_scale: int = 1.):
 
 class LayerIface(abc.ABC):
 
-    def eval(self, x):
+    def eval(self, x: List[tf.Tensor]):
         """Evaluate layer
 
         Args:
-            x (tf.tensor): input tensor
-                batches x parallel models x ...
+            x (List[tf.Tensor]): input tensor(s)
         
         Returns:
-            tf.tensor: reduced tensor
-                batches x num_parallel_models x width
+            tf.Tensor: reduced tensor
+                batches x parallel_dim1 x parallel_dim2 x ... x width
         """
         pass
 
@@ -124,11 +123,11 @@ class LayerBasic(LayerIface):
         wop = tf.expand_dims(w, 0)
         return wop
 
-    def eval(self, x):
+    def eval(self, x: List[tf.Tensor]):
         """Basic evaluation
 
         Args:
-            x (tf.tensor): input tensor
+            x (List[tf.Tensor]): input tensor
                 batches x ...
         
         Returns:
@@ -136,6 +135,7 @@ class LayerBasic(LayerIface):
                 batches x parallel models x width
         """
         # add dims for parallel models and width
+        x = x[0]
         x = tf.expand_dims(x, 1)
         x = tf.expand_dims(x, 1)
         return (self.offset + tf.math.reduce_sum(x * self._get_wop(),
@@ -238,11 +238,11 @@ class LayerFB(LayerIface):
         wop = tf.expand_dims(w, 0)
         return wop
 
-    def eval(self, x):
+    def eval(self, x: List[tf.Tensor]):
         """Basic evaluation
 
         Args:
-            x (tf.tensor): input tensor
+            x (List[tf.Tensor]): input tensor
                 batches x ...
         
         Returns:
@@ -250,6 +250,7 @@ class LayerFB(LayerIface):
                 batches x parallel models x width
         """
         # add dims for parallel models and width
+        x = x[0]
         x = tf.expand_dims(x, 1)
         x = tf.expand_dims(x, 1)
         return (self.offset + tf.math.reduce_sum(x * self._get_wop(),
@@ -297,11 +298,11 @@ class LayerMulti(LayerIface):
     def get_width(self):
         return self.width
     
-    def eval(self, x):
-        """x = List[tf.tensor]"""
+    def eval(self, x: List[tf.Tensor]):
+        """x = List[tf.Tensor]"""
         evs = []
         for xi, sl in zip(x, self.sub_layers):
-            evs.append(sl.eval(xi))
+            evs.append(sl.eval([xi]))
         return tf.add_n(evs)
     
     def spread_error(self):

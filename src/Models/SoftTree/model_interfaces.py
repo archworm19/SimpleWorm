@@ -18,11 +18,11 @@ class GateSubModel(abc.ABC):
         """
         pass
 
-    def get_state_probs(self, x: Union[tf.Tensor, List[tf.Tensor]]):
+    def get_state_probs(self, x: List[tf.Tensor]):
         """Get State probabilities
 
         Args:
-            x (Union[tf.Tensor, List[tf.Tensor]]): input
+            x (List[tf.Tensor]): input
                 batch_size x x1 x x2 x ...
                 where x1, x2, ... match layer factory
                     used to create this model 
@@ -42,13 +42,13 @@ class GateSubModel(abc.ABC):
         pass
 
     def regularization_loss(self,
-                            x: Union[tf.Tensor, List[tf.Tensor]],
+                            x: List[tf.Tensor],
                             data_weights: tf.Tensor,
                             reg_epoch_scale: float):
         """Regularization loss
         
         Args:
-            x (Union[tf.Tensor, List[tf.Tensor]]): input
+            x (List[tf.Tensor]): input
             data_weights (tf.Tensor): weights on the data points
                 batch_size x num_model
             reg_epoch_scale (float): how much to scale regularization
@@ -93,13 +93,13 @@ class PredSubModel(abc.ABC):
         pass
 
     def regularization_loss(self,
-                            x: Union[tf.Tensor, List[tf.Tensor]],
+                            x: List[tf.Tensor],
                             data_weights: tf.Tensor,
                             reg_epoch_scale: float):
         """Regularization loss
         
         Args:
-            x (Union[tf.Tensor, List[tf.Tensor]]): input
+            x (List[tf.Tensor]): input
             data_weights (tf.Tensor): weights on the data points
                 batch_size x ...
                 often batch_size x num_parallel_model
@@ -114,11 +114,11 @@ class PredSubModel(abc.ABC):
 
 class AModel(abc.ABC):
     # Assembeled Model interface
-    def loss(self, x: Union[tf.Tensor, List[tf.Tensor]], y: tf.Tensor, data_weights: tf.Tensor):
+    def loss(self, x: List[tf.Tensor], y: tf.Tensor, data_weights: tf.Tensor):
         """The loss function
 
         Args:
-            x (Union[tf.Tensor, List[tf.Tensor]]): inputs
+            x (List[tf.Tensor]): inputs
                 type/shape must match what is specified by layer/layer factory
             y (tf.Tensor): target/truth
                 batch_size
@@ -139,7 +139,7 @@ class AModel(abc.ABC):
         """
         pass
 
-    def loss_samples_noreg(self, x: Union[tf.Tensor, List[tf.Tensor]], y: tf.Tensor):
+    def loss_samples_noreg(self, x: List[tf.Tensor], y: tf.Tensor):
         """Loss for each sample in batch
 
         Args:
@@ -155,11 +155,11 @@ class AModel(abc.ABC):
         """
         pass
 
-    def get_preds(self, x: Union[tf.Tensor, List[tf.Tensor]]):
+    def get_preds(self, x: List[tf.Tensor]):
         """Predictions
 
         Args:
-            x (Union[tf.Tensor, List[tf.Tensor]]): inputs
+            x (List[tf.Tensor]): inputs
                 type/shape must match what is specified by layer/layer factory
         
         Returns:
@@ -177,13 +177,13 @@ class AModelEM(abc.ABC):
     # Assembeled Model interface
     # NOTE: EM framwork --> loss funcs will need latent state probs
 
-    def latent_posterior(self, x: Union[tf.Tensor, List[tf.Tensor]], y: tf.Tensor):
+    def latent_posterior(self, x: List[tf.Tensor], y: tf.Tensor):
         """Calculate the posterior probabilities
         of the latent state ~ p(Z | X, theta_t)
         used by the E step in expectation maximization
 
         Args:
-            x (Union[tf.Tensor, List[tf.Tensor]]): inputs
+            x (List[tf.Tensor]): inputs
                 type/shape must match what is specified by layer/layer factory
             y (tf.Tensor): target/truth ~ batch_size x 
         
@@ -198,14 +198,14 @@ class AModelEM(abc.ABC):
         """
         pass
 
-    def loss(self, x: Union[tf.Tensor, List[tf.Tensor]], y: tf.Tensor,
+    def loss(self, x: List[tf.Tensor], y: tf.Tensor,
                    data_weights: tf.Tensor, latent_probs: tf.Tensor):
         """The loss function
         Used by the M-step of expectation maximization
         Includes regularization loss
 
         Args:
-            x (Union[tf.Tensor, List[tf.Tensor]]): inputs
+            x (List[tf.Tensor]): inputs
                 type/shape must match what is specified by layer/layer factory
             y (tf.Tensor): target/truth
                 batch_size
@@ -232,13 +232,13 @@ class AModelEM(abc.ABC):
         """
         pass
 
-    def loss_samples_noreg(self, x: Union[tf.Tensor, List[tf.Tensor]],
+    def loss_samples_noreg(self, x: List[tf.Tensor],
                                  y: tf.Tensor, latent_probs: tf.Tensor):
         """Loss for each sample in batch
         with no regularization
 
         Args:
-            x (Union[tf.Tensor, List[tf.Tensor]]): inputs
+            x (List[tf.Tensor]): inputs
                 type/shape must match what is specified by layer/layer factory
             y (tf.Tensor): target/truth
                 batch_size

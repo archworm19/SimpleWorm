@@ -44,12 +44,12 @@ class ForestNode:
         return self.children
     
     def raw_eval(self,
-                 x: Union[tf.Tensor, List[tf.Tensor]]):
+                 x: List[tf.Tensor]):
         """Raw evaluation
         Raw = no processing (softmax, etc)
 
         Args:
-            x (Union[tf.Tensor, List[tf.Tensor]]): input
+            x (List[tf.Tensor]): input
                 has to match layer shape
 
         Returns:
@@ -135,14 +135,14 @@ class SoftForest(GateSubModel):
     def get_num_state(self):
         return self.num_state
 
-    def get_state_probs(self, x: Union[tf.Tensor, List[tf.Tensor]]):
+    def get_state_probs(self, x: List[tf.Tensor]):
         return self.eval(x)
 
-    def eval(self, x: Union[tf.Tensor, List[tf.Tensor]]):
+    def eval(self, x: List[tf.Tensor]):
         """evaluate the whole tree
 
         Args:
-            x (Union[tf.Tensor, List[tf.Tensor]]): input
+            x (List[tf.Tensor]): input
                 order/shape of x must match the supplied
                 LayerFactory
 
@@ -173,12 +173,12 @@ class SoftForest(GateSubModel):
 
     def _eval_branch(self,
                      node: ForestNode,
-                     x: Union[tf.Tensor, List[tf.Tensor]]):
+                     x: List[tf.Tensor]):
         """Evaluate current branch
 
         Args:
             node (ForestNode):
-            x (Union[tf.Tensor, List[tf.Tensor]]): input data
+            x (List[tf.Tensor]): input data
 
         Returns:
             tf.Tensor: probabilities within current
@@ -207,7 +207,7 @@ class SoftForest(GateSubModel):
             wz.extend(n.layer.get_trainable_weights())
         return wz
 
-    def _forest_loss(self, x: Union[tf.Tensor, List[tf.Tensor]],
+    def _forest_loss(self, x: List[tf.Tensor],
                            data_weights: tf.Tensor,
                            reg_epoch_scale: float):
         """Forest entropy loss
@@ -215,7 +215,7 @@ class SoftForest(GateSubModel):
         -->
 
         Args:
-            x (Union[tf.Tensor, List[tf.Tensor]]): input
+            x (List[tf.Tensor]): input
             data_weights (tf.Tensor): weights on the data points
                 batch_size x num_model
             reg_epoch_scale (float): how much to scale regularization
@@ -248,13 +248,13 @@ class SoftForest(GateSubModel):
         return tf.add_n(sp_errs) * self.spread_penalty
 
     def regularization_loss(self,
-                            x: Union[tf.Tensor, List[tf.Tensor]],
+                            x: List[tf.Tensor],
                             data_weights: tf.Tensor,
                             reg_epoch_scale: float):
         """Regularization loss
         
         Args:
-            x (Union[tf.Tensor, List[tf.Tensor]]): input
+            x (List[tf.Tensor]): input
             data_weights (tf.Tensor): weights on the data points
                 batch_size x num_model
             reg_epoch_scale (float): how much to scale regularization
