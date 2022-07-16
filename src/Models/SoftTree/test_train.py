@@ -6,8 +6,8 @@ from Models.SoftTree.forest import build_forest
 from Models.SoftTree.simple_predictors import LinearPred
 from Models.SoftTree.layers import LayerFactoryBasic
 from Models.SoftTree.objective_funcs import MultinomialLoss, BinaryLoss
-from Models.SoftTree.assembled_models import GatedLossModel
-from Models.SoftTree.train_model import DataPlan, train, _gather_data
+from Models.SoftTree.assembled_models import GatedLossModel, NoGateModel
+from Models.SoftTree.train_model import DataPlan, train, _gather_data, TrainStep
 import pylab as plt
 from tensorflow.keras.optimizers import SGD
 from numpy.random import default_rng
@@ -59,8 +59,7 @@ def _build_big_model():
     return GLM
 
 
-def _build_binary_classifier_model():
-    # NOTE: forest doesn't matter here...
+def _build_binary_classifier_model(forest_penalty: float = 0.):
     prediction_dims = 1  # binary
     layer_width = 2
     base_models = 2
@@ -72,7 +71,7 @@ def _build_binary_classifier_model():
 
     # forest = gating model
     depth = 1
-    forest, forest_width, _ = build_forest(depth, layer_factory, 0., 0.)
+    forest, forest_width, _ = build_forest(depth, layer_factory, forest_penalty, 0.)
 
     # simple prediction model
     base_models_pred = forest.get_num_state() * (base_models * models_per_base)
@@ -83,6 +82,26 @@ def _build_binary_classifier_model():
     # NOTE: pred_model --> batch_size x num_model x num_state x prediction dim (total_dims = 4)
     obj_func = BinaryLoss(4, 3)  # 3rd dim = (len=1) classifier dimension
     return GatedLossModel(forest, pred_model, obj_func)
+
+
+def _build_null_binary_classifier():
+    # NOTE: forest doesn't matter here...
+    prediction_dims = 1  # binary
+    layer_width = 2
+    base_models = 2
+    models_per_base = 4
+    xshape = [2]
+    rng = default_rng(42)
+
+    # simple prediction model
+    base_models_pred = base_models * models_per_base
+    layer_factory_pred = LayerFactoryBasic(base_models_pred, 1, xshape, prediction_dims, rng)
+    pred_model = LinearPred(layer_factory_pred.build_layer(), base_models*models_per_base, 1)
+
+    # objective function = binary class
+    # NOTE: pred_model --> batch_size x num_model x num_state x prediction dim (total_dims = 4)
+    obj_func = BinaryLoss(4, 3)  # 3rd dim = (len=1) classifier dimension
+    return NoGateModel(pred_model, obj_func)
 
 
 def test_binary_class():
@@ -100,7 +119,8 @@ def test_binary_class():
                                                         data_weights.astype(np.float32))).batch(32)
     data_plan = DataPlan([0], 1, 2)
     # train!
-    tr_losses = train(train_dataset, data_plan, GLM, SGD(),
+    train_step = TrainStep(GLM, SGD())
+    tr_losses = train(train_dataset, data_plan, train_step,
                         15, 15 * [1.])
     # TODO: move this code elsewhere:
     plt.figure()
@@ -117,6 +137,60 @@ def test_binary_class():
     plt.show()
 
 
+def test_xor():
+    # XOR binary classification problem
+    # --> should require depth
+    GLM = _build_binary_classifier_model()
+    NullM = _build_null_binary_classifier()
+
+    # XOR classification problem
+    # > if x1 > 0.5 XOR x2 > 0.5
+    batch_size = 128
+    x = npr.rand(batch_size, 2)
+    y = 1 * (np.logical_xor(x[:,0] > 0.5, x[:,1] > 0.5))
+    data_weights = np.ones((batch_size, 8))  # there are 8 models (2 parallel sets)
+    # convert to dataset:
+    train_dataset = tf.data.Dataset.from_tensor_slices((x.astype(np.float32),
+                                                        y.astype(np.float32),
+                                                        data_weights.astype(np.float32))).batch(32)
+    data_plan = DataPlan([0], 1, 2)
+
+    # train null model
+    null_train_step = TrainStep(NullM, SGD())
+    tr_losses_null = train(train_dataset, data_plan, null_train_step,
+                           300, 300 * [1.])
+    full_train_step = TrainStep(GLM, SGD(0.05))
+    tr_losses_full = train(train_dataset, data_plan, full_train_step,
+                           300, [0.95 ** z for z in range(300)])
+
+    plt.figure()
+    plt.plot(tr_losses_null, c='b')
+    plt.plot(tr_losses_full, c='r')
+    plt.legend(["Null", "Full"])
+
+    plt.figure()
+    for batch in train_dataset:
+        x, y, _dw = _gather_data(batch, data_plan)
+        # average estimates across models and state
+        # NOTE: these are logits
+
+        # scaled predictions for forest
+        [gates, preds] = GLM.get_preds(x)
+        # --> batch_size x models
+        w_preds = np.sum(gates * np.sum(preds, axis=3), axis=2)
+        # average across models --> batch_size
+        logit_preds_full = np.mean(w_preds, axis=1)
+        plt.scatter(logit_preds_full, y.numpy(), c='r')
+
+        # nulls
+        logit_preds_null = np.mean(NullM.get_preds(x)[0].numpy(), axis=(1, 2, 3))
+        plt.scatter(logit_preds_null, y.numpy(), c='b')
+
+    plt.xlabel("model prediction logit")
+    plt.ylabel("truth")
+    plt.show()
+
+
 
 # TODO: test other types of models...
 
@@ -124,3 +198,4 @@ def test_binary_class():
 if __name__ == "__main__":
     _build_big_model()
     test_binary_class()
+    test_xor()

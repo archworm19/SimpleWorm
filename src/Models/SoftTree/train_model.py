@@ -23,6 +23,32 @@ class DataPlan:
     data_weight_inds: int
 
 
+class TrainStep:
+    """Build training graph
+    Initialize with permanent objects/components
+        == objects that are reused for all training steps
+    Why package this into class?
+        > allow for training of multiple model types
+            in same session"""
+    # TODO: optimizer type?
+    def __init__(self, model: AModel, optimizer):
+        self.model = model
+        self.optimizer = optimizer
+
+    @tf.function
+    def train(self, x, y, data_weights,
+                    epoch_temperature: tf.constant):
+        with tf.GradientTape() as tape:
+            loss = self.model.loss(x, y, data_weights, epoch_temperature)
+        grads = tape.gradient(loss, self.model.get_trainable_weights())
+        self.optimizer.apply_gradients(zip(grads, self.model.get_trainable_weights()))
+        return loss
+
+    @tf.function
+    def loss(self, x, y, data_weights, epoch_temperature):
+        return self.model.loss(x, y, data_weights, epoch_temperature)
+
+
 def _gather_data(dat: tf.data.Dataset,
                  data_plan: DataPlan):
     """gather data from dataset dat
@@ -43,25 +69,15 @@ def _gather_data(dat: tf.data.Dataset,
     return x, y, data_weights
 
 
-@tf.function
-def train_step(model: AModel, optimizer, x, y, data_weights,
-                epoch_temperature: tf.constant):
-    with tf.GradientTape() as tape:
-        loss = model.loss(x, y, data_weights, epoch_temperature)
-    grads = tape.gradient(loss, model.get_trainable_weights())
-    optimizer.apply_gradients(zip(grads, model.get_trainable_weights()))
-    return loss
-
-
 # TODO: optimizer type?
 def train_epoch(train_dataset: tf.data.Dataset, data_plan: DataPlan,
-                model: AModel, optimizer,
+                train_step: TrainStep,
                 epoch_temperature: tf.constant):
     tr_losses = []
     for _step, dat in enumerate(train_dataset):
         x, y, data_weights = _gather_data(dat, data_plan)
-        train_step(model, optimizer, x, y, data_weights, epoch_temperature)
-        tr_losses.append(model.loss(x, y, data_weights, epoch_temperature).numpy())
+        train_step.train(x, y, data_weights, epoch_temperature)
+        tr_losses.append(train_step.loss(x, y, data_weights, epoch_temperature).numpy())
     return tr_losses
 
 
@@ -87,14 +103,13 @@ def eval_losses(train_dataset, model: AModel):
 
 
 def train(train_dataset: tf.data.Dataset, data_plan: DataPlan,
-            model: AModel, optimizer,
+            train_step: TrainStep,
             num_epoch: int = 3, epoch_temps: List[float] = [1., 1., 1.]):
     """Train for a number of epochs
 
     Args:
         train_dataset (tf.dataset): tensorflow training dataset (should be batched)
-        model (AModel): assembeled model
-        optimizer (_type_): tensorflow optimizer
+        train_step (TrainStep): model and optimizer packaged together
         num_epoch (int, optional): number of epochs. Defaults to 3.
         epoch_temps (List[float]): regularization scales for each epoch
             when = 1. --> no scaling of regularizers
@@ -105,7 +120,7 @@ def train(train_dataset: tf.data.Dataset, data_plan: DataPlan,
     assert(len(epoch_temps) == num_epoch)
     epoch_tr_losses = []
     for epoch in range(num_epoch):
-        tr_losses = train_epoch(train_dataset, data_plan, model, optimizer, tf.constant(epoch_temps[epoch]))
+        tr_losses = train_epoch(train_dataset, data_plan, train_step, tf.constant(epoch_temps[epoch]))
 
         # TODO: fix loss eval issues
         #c_loss = eval_losses(train_dataset, model)
