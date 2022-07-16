@@ -22,19 +22,24 @@ class ObjFunc(abc.ABC):
             y (tf.Tensor): truths
 
         Returns:
-            tf.tensor: batch_size x parallel_dimensions ...
+            tf.tensor: batch_size x [parallel_dimensions]
         """
         pass
 
 
 class BinaryLoss(ObjFunc):
 
-    def __init__(self, total_dims: int):
+    def __init__(self, total_dims: int,
+                    class_dim: int):
         """
-        don't really need total_dims but maybe useful later?
-        Assumes no reduction dim ~ already done
-        total_dims should include batch dimension"""
+        total_dims = all dimensions in prediction
+        class_dim = (len=1) dimension for classification dim
+            TODO: kinda bad design to require this...
+        NOTE: ObjFunc interface assumes reduction
+            across all non-parallel/sample dimensions
+            ... this is particularly important for binary loss"""
         self.total_dims = total_dims
+        self.class_dim = class_dim
         self.new_shape = [-1] + [1 for _ in range(total_dims-1)]
 
     def loss_sample(self, predictions: tf.Tensor, y: tf.Tensor):
@@ -56,7 +61,7 @@ class BinaryLoss(ObjFunc):
             y (tf.Tensor): binary/boolean tensor
 
         Returns:
-            tf.Tensor: num_parallel_dims ...
+            tf.Tensor: batch_size x [parallel_dimensions]
         """
         # reshape y:
         y2 = tf.reshape(y, self.new_shape)
@@ -65,7 +70,7 @@ class BinaryLoss(ObjFunc):
         # primary term
         yp = y2 * predictions
         log_like = yp - K
-        return -1 * log_like
+        return tf.reduce_sum(-1 * log_like, axis=self.class_dim)
 
 
 class MultinomialLoss(ObjFunc):
@@ -99,7 +104,7 @@ class MultinomialLoss(ObjFunc):
                 batch_size
 
         Returns:
-            tf.Tensor: num_parallel_dims ...
+            tf.Tensor: batch_size x [parallel_dimensions]
         """
         # norm term
         kx = tf.math.log(tf.reduce_sum(tf.math.exp(predictions), axis=self.class_dim))

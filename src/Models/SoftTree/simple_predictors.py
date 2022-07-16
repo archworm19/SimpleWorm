@@ -43,3 +43,7 @@ class LinearPred(PredSubModel):
         raw_eval = self.layer.eval(x)
         # reshape to separate parallel models and states:
         return tf.reshape(raw_eval, self.new_shape)
+
+    def regularization_loss(self, x: List[tf.Tensor], data_weights: tf.Tensor, reg_epoch_scale: tf.constant):
+        # TODO: should probably change this!
+        return tf.constant(0., dtype=tf.float32)

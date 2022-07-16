@@ -44,14 +44,14 @@ class GateSubModel(abc.ABC):
     def regularization_loss(self,
                             x: List[tf.Tensor],
                             data_weights: tf.Tensor,
-                            reg_epoch_scale: float):
+                            reg_epoch_scale: tf.constant):
         """Regularization loss
         
         Args:
             x (List[tf.Tensor]): input
             data_weights (tf.Tensor): weights on the data points
                 batch_size x num_model
-            reg_epoch_scale (float): how much to scale regularization
+            reg_epoch_scale (tf.constant): how much to scale regularization
                 by as a function of epoch == f(temperature)
 
         Returns:
@@ -95,7 +95,7 @@ class PredSubModel(abc.ABC):
     def regularization_loss(self,
                             x: List[tf.Tensor],
                             data_weights: tf.Tensor,
-                            reg_epoch_scale: float):
+                            reg_epoch_scale: tf.constant):
         """Regularization loss
         
         Args:
@@ -103,7 +103,7 @@ class PredSubModel(abc.ABC):
             data_weights (tf.Tensor): weights on the data points
                 batch_size x ...
                 often batch_size x num_parallel_model
-            reg_epoch_scale (float): how much to scale regularization
+            reg_epoch_scale (tf.constant): how much to scale regularization
                 by as a function of epoch == f(temperature)
 
         Returns:
@@ -114,7 +114,8 @@ class PredSubModel(abc.ABC):
 
 class AModel(abc.ABC):
     # Assembeled Model interface
-    def loss(self, x: List[tf.Tensor], y: tf.Tensor, data_weights: tf.Tensor):
+    def loss(self, x: List[tf.Tensor], y: tf.Tensor, data_weights: tf.Tensor,
+                reg_epoch_scale: tf.constant):
         """The loss function
 
         Args:

@@ -64,10 +64,11 @@ class GatedLossModel(AModel):
         # --> batch_size x parallel_dims = batch_size x num_model x num_state
         parallel_loss = self.obj_func.loss_sample(preds, y)
         # scale losses by gating probabilities
-        return gates * parallel_loss
+        # and reduce across states
+        return tf.reduce_sum(gates * parallel_loss, axis=2)
         
     def loss(self, x: List[tf.Tensor], y: tf.Tensor, data_weights: tf.Tensor,
-                reg_epoch_scale: float = 1.):
+                reg_epoch_scale: tf.constant = tf.constant(1.)):
         """Loss from loss_samples_noreg + regularization losses
 
         Args:
@@ -75,7 +76,7 @@ class GatedLossModel(AModel):
             y (tf.Tensor): truth
             data_weights (tf.Tensor): weights on each datapoint
                 in the sample
-            reg_epoch_scale (float): how much to scale regularization by dynamically
+            reg_epoch_scale (tf.constant): how much to scale regularization by dynamically
                 = a function of temperature
         """
         core_loss = tf.reduce_sum(self.loss_samples_noreg(x, y) * data_weights)
@@ -142,7 +143,7 @@ class GatedPredModel(AModel):
         return parallel_loss
         
     def loss(self, x: List[tf.Tensor], y: tf.Tensor, data_weights: tf.Tensor,
-                reg_epoch_scale: float = 1.):
+                reg_epoch_scale: tf.constant = tf.constant(1.)):
         """Loss from loss_samples_noreg + regularization losses
 
         Args:
@@ -151,61 +152,10 @@ class GatedPredModel(AModel):
             data_weights (tf.Tensor): weights on each datapoint
                 in the sample
                 batch_size x num_model
-            reg_epoch_scale (float): how much to scale regularization by dynamically
+            reg_epoch_scale (tf.constant): how much to scale regularization by dynamically
                 = a function of temperature
         """
         core_loss = tf.reduce_sum(self.loss_samples_noreg(x, y) * data_weights)
         return (core_loss +
                 self.pred_model.regularization_loss(x, data_weights, reg_epoch_scale) +
                 self.gating_model.regularization_loss(x, data_weights, reg_epoch_scale))
-
-
-if __name__ == "__main__":
-    # TODO: move this testing code to a different file
-
-    from Models.SoftTree.forest import build_forest
-    from Models.SoftTree.simple_predictors import LinearPred
-    from Models.SoftTree.layers import LayerFactoryBasic
-    from Models.SoftTree.objective_funcs import MultinomialLoss
-    from numpy.random import default_rng
-    import numpy.random as npr
-
-    prediction_dim = 6
-    layer_width = 2
-    base_models = 2
-    models_per_base = 4
-    xshape = [5, 5]  # input from 5x5 matrix space
-    rng = default_rng(42)
-
-    layer_factory = LayerFactoryBasic(base_models, models_per_base, xshape, layer_width, rng)
-
-    # forest = gating model
-    depth = 2
-    forest, forest_width, _ = build_forest(depth, layer_factory, 0., 0.)
-
-    # simple prediction model
-    base_models_pred = forest.get_num_state() * (base_models * models_per_base)
-    layer_factory_pred = LayerFactoryBasic(base_models_pred, 1, xshape, prediction_dim, rng)
-    pred_model = LinearPred(layer_factory_pred.build_layer(), base_models*models_per_base, forest.get_num_state())
-
-    # objective function:
-    norm_dim = 3  # which dim of tensor contains the logits
-    obj_func = MultinomialLoss(norm_dim)
-
-    # whole model
-    GLM = GatedLossModel(forest, pred_model, obj_func)
-    print(len(GLM.get_trainable_weights()))
-    # run stuff thru model
-    batch_size = 64
-    xshape_dat = [batch_size] + xshape
-    x = tf.constant(npr.rand(*xshape_dat), dtype=tf.float32)
-    model_predz = GLM.get_preds([x])
-    print(len(model_predz))
-    print(model_predz[0].shape)
-    print(model_predz[1].shape)
-
-    # y dictated by objective function
-    y = npr.randint(0, 6, (batch_size,))
-    y = tf.constant(y, dtype=tf.int32)
-    loss_sample = GLM.loss_samples_noreg([x], y)
-    print(loss_sample.shape)
