@@ -13,11 +13,10 @@ from dataclasses import dataclass
 from Models.SoftTree.model_interfaces import AModel
 
 
-# TODO: checking mechanisms to ensure shape matches
-
 @dataclass
 class DataPlan:
-    """Index assignment"""
+    """Index assignment
+    = indices within tf.dataset"""
     x_inds: List[int]
     y_ind: int
     data_weight_inds: int
@@ -30,14 +29,13 @@ class TrainStep:
     Why package this into class?
         > allow for training of multiple model types
             in same session"""
-    # TODO: optimizer type?
-    def __init__(self, model: AModel, optimizer):
+    def __init__(self, model: AModel, optimizer: tf.keras.optimizers.Optimizer):
         self.model = model
         self.optimizer = optimizer
 
     @tf.function
-    def train(self, x, y, data_weights,
-                    epoch_temperature: tf.constant):
+    def train(self, x: List[tf.Tensor], y: tf.Tensor,
+                    data_weights: tf.Tensor, epoch_temperature: tf.constant):
         with tf.GradientTape() as tape:
             loss = self.model.loss(x, y, data_weights, epoch_temperature)
         grads = tape.gradient(loss, self.model.get_trainable_weights())
@@ -45,8 +43,13 @@ class TrainStep:
         return loss
 
     @tf.function
-    def loss(self, x, y, data_weights, epoch_temperature):
+    def loss(self, x: List[tf.Tensor], y: tf.Tensor,
+                   data_weights: tf.Tensor, epoch_temperature: tf.constant):
         return self.model.loss(x, y, data_weights, epoch_temperature)
+
+    @tf.function
+    def loss_samples_noreg(self, x: List[tf.Tensor], y: tf.Tensor):
+        return self.model.loss_samples_noreg(x, y)
 
 
 def _gather_data(dat: tf.data.Dataset,
@@ -69,7 +72,6 @@ def _gather_data(dat: tf.data.Dataset,
     return x, y, data_weights
 
 
-# TODO: optimizer type?
 def train_epoch(train_dataset: tf.data.Dataset, data_plan: DataPlan,
                 train_step: TrainStep,
                 epoch_temperature: tf.constant):
@@ -81,14 +83,14 @@ def train_epoch(train_dataset: tf.data.Dataset, data_plan: DataPlan,
     return tr_losses
 
 
-# TODO: finish this
-# TODO: needs support for temperatures
-def eval_losses(train_dataset, model: AModel):
-    """Get prediction loss for each batch, model combination
+def eval_losses_noreg(train_dataset: tf.data.Dataset, data_plan: DataPlan,
+                        train_step: TrainStep):
+    """Get loss without regularization for all samples
 
     Args:
-        train_dataset (tf.dataset): training dataset
-        model: the model
+        train_dataset (tf.data.Dataset):
+        data_plan (DataPlan):
+        train_step (TrainStep):
 
     Returns:
         np.ndarray: losses
@@ -96,9 +98,13 @@ def eval_losses(train_dataset, model: AModel):
     """
     combo_losses = []
     for _step, dat in enumerate(train_dataset):
-        x, y, data_weights = _gather_data(dat)
-        c_loss = model.loss_samples_noreg(x, y, data_weights)
-        combo_losses.append(c_loss.numpy())
+        x, y, data_weights = _gather_data(dat, data_plan)
+        c_loss = train_step.loss_samples_noreg(x, y)
+        # reshape data_weights:
+        N = len(np.shape(c_loss)) - len(np.shape(data_weights))
+        dw = np.reshape(data_weights, list(np.shape(data_weights)) + [1 for _ in range(N)])
+        # save loss without reduction
+        combo_losses.append(dw * c_loss.numpy())
     return np.vstack(combo_losses)
 
 
@@ -120,10 +126,8 @@ def train(train_dataset: tf.data.Dataset, data_plan: DataPlan,
     assert(len(epoch_temps) == num_epoch)
     epoch_tr_losses = []
     for epoch in range(num_epoch):
-        tr_losses = train_epoch(train_dataset, data_plan, train_step, tf.constant(epoch_temps[epoch]))
-
-        # TODO: fix loss eval issues
-        #c_loss = eval_losses(train_dataset, model)
-        #e_loss.append(np.sum(c_loss))
-        epoch_tr_losses.append(sum(tr_losses))
+        _tr_losses = train_epoch(train_dataset, data_plan, train_step, tf.constant(epoch_temps[epoch]))
+        # evaluate loss for frozen model
+        tr_losses = eval_losses_noreg(train_dataset, data_plan, train_step)
+        epoch_tr_losses.append(np.sum((tr_losses)))
     return epoch_tr_losses
