@@ -5,7 +5,7 @@ import tensorflow as tf
 from Models.SoftTree.forest import build_forest
 from Models.SoftTree.simple_predictors import LinearPred
 from Models.SoftTree.layers import LayerFactoryBasic
-from Models.SoftTree.objective_funcs import MultinomialLoss, BinaryLoss
+from Models.SoftTree.objective_funcs import MultinomialLoss, BinaryLoss, QuantileLoss
 from Models.SoftTree.assembled_models import GatedLossModel, NoGateModel
 from Models.SoftTree.train_model import DataPlan, train, _gather_data, TrainStep
 import pylab as plt
@@ -87,7 +87,6 @@ def _build_binary_classifier_model(forest_penalty: float = 0.):
 def _build_null_binary_classifier():
     # NOTE: forest doesn't matter here...
     prediction_dims = 1  # binary
-    layer_width = 2
     base_models = 2
     models_per_base = 4
     xshape = [2]
@@ -101,6 +100,26 @@ def _build_null_binary_classifier():
     # objective function = binary class
     # NOTE: pred_model --> batch_size x num_model x num_state x prediction dim (total_dims = 4)
     obj_func = BinaryLoss(4, 3)  # 3rd dim = (len=1) classifier dimension
+    return NoGateModel(pred_model, obj_func)
+
+
+def _build_null_quantile_loss():
+    # NOTE: forest doesn't matter here...
+    prediction_dims = 5  # 5 taus
+    base_models = 2
+    models_per_base = 4
+    xshape = [2]
+    rng = default_rng(42)
+
+    # simple prediction model
+    base_models_pred = base_models * models_per_base
+    layer_factory_pred = LayerFactoryBasic(base_models_pred, 1, xshape, prediction_dims, rng)
+    pred_model = LinearPred(layer_factory_pred.build_layer(), base_models*models_per_base, 1)
+
+    # objective function = quantile regression:
+    # NOTE: pred_model --> batch_size x num_model x num_state (1 here) x prediction dim (total_dims = 4)
+    taus = tf.constant([.1, .25, .5, .75, .9])
+    obj_func = QuantileLoss(4, 3, taus)
     return NoGateModel(pred_model, obj_func)
 
 
@@ -159,6 +178,7 @@ def test_xor():
     null_train_step = TrainStep(NullM, SGD())
     tr_losses_null = train(train_dataset, data_plan, null_train_step,
                            300, 300 * [1.])
+    # train full model
     full_train_step = TrainStep(GLM, SGD(0.05))
     tr_losses_full = train(train_dataset, data_plan, full_train_step,
                            300, [0.95 ** z for z in range(300)])
@@ -191,11 +211,53 @@ def test_xor():
     plt.show()
 
 
+def test_quantile_regression():
+    # quantile regression without gating model
+    # taus = .1, .25, .5, .75, .9
+    taus = [.1, .25, .5, .75, .9]
+    M = _build_null_quantile_loss()
+
+    # don't care about x, just have it learn offsets
+    N = 128
+    x = np.zeros((N, 2))
+    y = np.arange(128)
+    y_true = y
+    data_weights = np.ones((N, 8))  # there are 8 models (2 parallel sets)
+    # convert to dataset:
+    train_dataset = tf.data.Dataset.from_tensor_slices((x.astype(np.float32),
+                                                        y.astype(np.float32),
+                                                        data_weights.astype(np.float32))).batch(32)
+    data_plan = DataPlan([0], 1, 2)
+    # train null model
+    null_train_step = TrainStep(M, SGD(0.1))
+    tr_losses_null = train(train_dataset, data_plan, null_train_step,
+                           30, 30 * [1.])
+
+    plt.figure()
+    plt.plot(tr_losses_null)
+
+    # NOTE: since no relevant x --> will get constant prediction!
+    v = []
+    for batch in train_dataset:
+        x, _y, _dw = _gather_data(batch, data_plan)
+        # average estimates across models and state
+        # NOTE: these are logits
+        # nulls
+        logit_preds_null = np.mean(M.get_preds(x)[0].numpy(), axis=(1, 2))
+        v.append(logit_preds_null)
+    v = np.mean(np.vstack(v), axis=0)
+    y_true = [np.percentile(y_true, tau * 100) for tau in taus]
+    plt.figure()
+    plt.scatter(v, y_true)
+    plt.show()
+
+
 
 # TODO: test other types of models...
 
 
 if __name__ == "__main__":
-    _build_big_model()
-    test_binary_class()
-    test_xor()
+    #_build_big_model()
+    #test_binary_class()
+    #test_xor()
+    test_quantile_regression()

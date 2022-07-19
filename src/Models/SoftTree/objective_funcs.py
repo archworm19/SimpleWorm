@@ -128,6 +128,7 @@ class QuantileLoss(ObjFunc):
             num_quantile
         """
         self.taus = taus
+        self.tau_dim = tau_dim
         self.total_dims = total_dims
         assert(tf.reduce_all(taus > 0.)), "illegal taus low"
         assert(tf.reduce_all(taus < 1.)), "illegal taus hi"
@@ -170,5 +171,5 @@ class QuantileLoss(ObjFunc):
         right = (self.taus_shaped *
                 tf.stop_gradient(tf.cast(dt >= 0, predictions.dtype)) *
                 dt)
-
-        return left + right
+        # reduce across tau dim (cuz tau is not a parallel dim!)
+        return tf.reduce_sum(left + right, axis=self.tau_dim)
