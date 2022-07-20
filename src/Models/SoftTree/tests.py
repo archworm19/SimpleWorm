@@ -6,6 +6,7 @@ from Models.SoftTree import decoders
 # from Models.SoftTree.assembled_models_em import GMMforestEM  # TODO: port to new interface
 import Models.SoftTree.train_model as train_model
 from Models.SoftTree.objective_funcs import BinaryLoss, MultinomialLoss, QuantileLoss
+from Models.SoftTree.data_weight_generators import StandardDWG, NullDWG
 import tensorflow as tf
 import numpy as np
 import numpy.random as npr
@@ -325,21 +326,21 @@ def test_GMMForestEM_simplefit():
 def test_binaryloss_objfunc():
     tol = 1e-4
     # binary loss
-    ar_np = np.ones((4, 2)) * -5.
+    ar_np = np.ones((4, 2, 1)) * -5.
     # class predictions = 0, 0, 1, 1 for both models
     ar_np[2:,:] = 5.
     # truths = 0, 1, 0, 1 (ends correct --> low error end, high error mids)
     truths_np = np.array([0, 1, 0, 1])
     preds = tf.constant(ar_np, tf.float32)
     truths = tf.constant(truths_np, tf.float32)
-    BL = BinaryLoss(2)
+    BL = BinaryLoss(3, 2)
     bl_loss = BL.loss_sample(preds, truths)
-    assert(np.shape(bl_loss.numpy()) == (4,2))
+    assert(np.shape(bl_loss.numpy()) == (4, 2))
     targ = np.array([[.0067, .0067], [5.0067, 5.0067], [5.0067, 5.0067], [.0067, .0067]])
     assert(np.all((bl_loss.numpy() - targ) < tol))
 
     # compare to non-expanded formulation
-    pred_prob = tf.nn.sigmoid(preds)
+    pred_prob = tf.nn.sigmoid(preds[:, :, 0])
     truths_re = tf.reshape(truths, [-1,1])
     loss_ref = -1 * (truths_re * tf.math.log(pred_prob) + (1 - truths_re) * tf.math.log(1 - pred_prob))
     assert(np.all((bl_loss - loss_ref).numpy() < tol))
@@ -386,18 +387,7 @@ def test_quantileloss_objfunc():
     taus = tf.constant([.1, .5, .9])
     QL = QuantileLoss(3, 2, taus)
     ql_loss = QL.loss_sample(preds, truths)
-    assert(np.shape(ql_loss.numpy()) == (5, 2, 3))
-    targ = [[[0.9, 0.5, 0.10000002],
-             [0.9, 0.5, 0.10000002]],
-            [[0.45, 0.25, 0.05000001],
-             [0.45, 0.25, 0.05000001]],
-            [[0.,  0.,  0., ],
-             [0.,  0.,  0., ]],
-            [[0.05, 0.25, 0.45],
-            [0.05, 0.25, 0.45]],
-            [[0.1, 0.5, 0.9, ],
-            [0.1, 0.5, 0.9, ]]]
-    assert(np.all((ql_loss - targ) < tol))
+    assert(np.shape(ql_loss.numpy()) == (5, 2))
 
     # more easily interpretable test?
     # ensure loss is minimized for correct quantile!
@@ -414,6 +404,21 @@ def test_quantileloss_objfunc():
         assert(np.all(np.diff(np.array(lozz)) >= 0))
 
 
+def test_standard_dw_gen():
+    # standard data weight generator
+    T = 100
+    num_model = 8
+    S = StandardDWG(num_model, 42)
+    run1 = S.gen_data_weights(np.arange(100))
+    run2 = S.gen_data_weights(np.arange(100))
+    # test shape
+    assert(run1.shape == (T, num_model))
+    assert(tf.reduce_all(run1 == run2).numpy())
+
+    N = NullDWG(num_model)
+    null_run = N.gen_data_weights(np.arange(100))
+    assert(tf.reduce_all(null_run == 1.).numpy())
+
 
 if __name__ == '__main__':
     test_layers()
@@ -425,3 +430,4 @@ if __name__ == '__main__':
     test_binaryloss_objfunc()
     test_multiloss_objfunc()
     test_quantileloss_objfunc()
+    test_standard_dw_gen()

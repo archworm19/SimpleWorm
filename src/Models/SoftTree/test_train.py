@@ -8,6 +8,7 @@ from Models.SoftTree.layers import LayerFactoryBasic
 from Models.SoftTree.objective_funcs import MultinomialLoss, BinaryLoss, QuantileLoss
 from Models.SoftTree.assembled_models import GatedLossModel, NoGateModel
 from Models.SoftTree.train_model import DataPlan, train, _gather_data, TrainStep
+from Models.SoftTree.data_weight_generators import NullDWG
 import pylab as plt
 from tensorflow.keras.optimizers import SGD
 from numpy.random import default_rng
@@ -131,22 +132,22 @@ def test_binary_class():
     batch_size = 128
     x = npr.rand(batch_size, 2)
     y = 1 * (np.sum(x, axis=1) > 1.)
-    data_weights = np.ones((batch_size, 8))  # there are 8 models (2 parallel sets)
     # convert to dataset:
     train_dataset = tf.data.Dataset.from_tensor_slices((x.astype(np.float32),
                                                         y.astype(np.float32),
-                                                        data_weights.astype(np.float32))).batch(32)
+                                                        np.arange(batch_size))).batch(32)
     data_plan = DataPlan([0], 1, 2)
+    dw_gen = NullDWG(8)
     # train!
     train_step = TrainStep(GLM, SGD())
-    tr_losses = train(train_dataset, data_plan, train_step,
+    tr_losses = train(train_dataset, data_plan, dw_gen, train_step,
                         15, 15 * [1.])
-    # TODO: move this code elsewhere:
+    # plt results
     plt.figure()
     plt.plot(tr_losses)
     plt.figure()
     for batch in train_dataset:
-        x, y, _dw = _gather_data(batch, data_plan)
+        x, y, _dw = _gather_data(batch, data_plan, dw_gen)
         # average estimates across models and state
         # NOTE: these are logits
         logit_preds = np.mean(GLM.get_preds(x)[1].numpy(), axis=(1, 2, 3))
@@ -167,20 +168,19 @@ def test_xor():
     batch_size = 128
     x = npr.rand(batch_size, 2)
     y = 1 * (np.logical_xor(x[:,0] > 0.5, x[:,1] > 0.5))
-    data_weights = np.ones((batch_size, 8))  # there are 8 models (2 parallel sets)
     # convert to dataset:
     train_dataset = tf.data.Dataset.from_tensor_slices((x.astype(np.float32),
                                                         y.astype(np.float32),
-                                                        data_weights.astype(np.float32))).batch(32)
+                                                        np.arange(batch_size))).batch(32)
     data_plan = DataPlan([0], 1, 2)
-
+    dw_gen = NullDWG(8)  # there are 8 models (2 parallel sets)
     # train null model
     null_train_step = TrainStep(NullM, SGD())
-    tr_losses_null = train(train_dataset, data_plan, null_train_step,
+    tr_losses_null = train(train_dataset, data_plan, dw_gen, null_train_step,
                            300, 300 * [1.])
     # train full model
     full_train_step = TrainStep(GLM, SGD(0.05))
-    tr_losses_full = train(train_dataset, data_plan, full_train_step,
+    tr_losses_full = train(train_dataset, data_plan, dw_gen, full_train_step,
                            300, [0.95 ** z for z in range(300)])
 
     plt.figure()
@@ -190,7 +190,7 @@ def test_xor():
 
     plt.figure()
     for batch in train_dataset:
-        x, y, _dw = _gather_data(batch, data_plan)
+        x, y, _dw = _gather_data(batch, data_plan, dw_gen)
         # average estimates across models and state
         # NOTE: these are logits
 
@@ -222,15 +222,15 @@ def test_quantile_regression():
     x = np.zeros((N, 2))
     y = np.arange(128)
     y_true = y
-    data_weights = np.ones((N, 8))  # there are 8 models (2 parallel sets)
     # convert to dataset:
     train_dataset = tf.data.Dataset.from_tensor_slices((x.astype(np.float32),
                                                         y.astype(np.float32),
-                                                        data_weights.astype(np.float32))).batch(32)
+                                                        np.arange(N))).batch(32)
     data_plan = DataPlan([0], 1, 2)
+    dw_gen = NullDWG(8)  # there are 8 models (2 parallel sets)
     # train null model
     null_train_step = TrainStep(M, SGD(0.1))
-    tr_losses_null = train(train_dataset, data_plan, null_train_step,
+    tr_losses_null = train(train_dataset, data_plan, dw_gen, null_train_step,
                            30, 30 * [1.])
 
     plt.figure()
@@ -239,7 +239,7 @@ def test_quantile_regression():
     # NOTE: since no relevant x --> will get constant prediction!
     v = []
     for batch in train_dataset:
-        x, _y, _dw = _gather_data(batch, data_plan)
+        x, _y, _dw = _gather_data(batch, data_plan, dw_gen)
         # average estimates across models and state
         # NOTE: these are logits
         # nulls
@@ -257,7 +257,7 @@ def test_quantile_regression():
 
 
 if __name__ == "__main__":
-    #_build_big_model()
-    #test_binary_class()
-    #test_xor()
+    _build_big_model()
+    test_binary_class()
+    test_xor()
     test_quantile_regression()

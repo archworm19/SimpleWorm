@@ -28,7 +28,7 @@ def _format_experiment_config(ecf: ExperimentConfig):
                                                                    str(ecf.target_cell))
 
 
-def _experiment_configs(data_loader_cells: List[str]):
+def _get_experiment_configs(data_loader_cell_names: List[str]):
     """returns list of experiment configs"""
     # only 1 experiment here --> all cells as inputs
     # and input as target
@@ -37,12 +37,12 @@ def _experiment_configs(data_loader_cells: List[str]):
     # convert input cells to indices
     input_cell_inds = []
     for ic in input_cells:
-        match_inds = [z for z, dlc in enumerate(data_loader_cells)
+        match_inds = [z for z, dlc in enumerate(data_loader_cell_names)
                       if ic == dlc]
         assert(len(match_inds) == 1)
         input_cell_inds.append(match_inds[0])
     # convert target to index
-    targ_cell_ind_raw = [z for z, dlc in enumerate(data_loader_cells)
+    targ_cell_ind_raw = [z for z, dlc in enumerate(data_loader_cell_names)
                          if target_cell == dlc]
     assert(len(targ_cell_ind_raw) == 1)
     targ_cell_ind = targ_cell_ind_raw[0]
@@ -64,20 +64,25 @@ def _apply_timewindow(ar: np.ndarray, twindow_size: int, twindow_offset: int):
 def _convert_to_tf_filesystem(cell_clusts: List[List[np.ndarray]],
                               id_data: List[List[np.ndarray]],
                               set_names: List[str],
-                              ecf: ExperimentConfig):
-    # TODO: before packaging into tf.dataset, right???
+                              ecf: ExperimentConfig,
+                              temp_dir_name: str):
     """convert to tensorflow-based filesystem + perform pre-processing
+    NOTE: this file sets created by this function are independent
+        of run parameters --> you can run multiple models with
+        its output
     Assumes: set of animals
         > sub-lists = different animal types / setup types
-        > arrays = different animals"""
+        > arrays = different animals
+    Returns a root file set"""
     all_file_sets = []
     assert(twindow_size % 2 == 0)
     # NOTE: ASSUMPTION = start in middle of window
     # TODO: should maybe be in configuration
     kOFF = int(ecf.twindow_size / 2)
     # iter thru sets
+    current_absolute_idx = 0  # start from 0
     for cell_set, id_set, set_name in zip(cell_clusts, id_data, set_names):
-        x, y, data_weights = [], [], []
+        x, y = [], []
         # iter thru animals
         for cell_worm, id_worm in zip(cell_set, id_set):
             # cell index selection
@@ -86,25 +91,41 @@ def _convert_to_tf_filesystem(cell_clusts: List[List[np.ndarray]],
 
             # timewindow packaging
             # x1: input_cells
-            _legal_ts_x1, x1 = _apply_timewindow(cell_worm, ecf.twindow_size, 0)
+            _legal_ts_x1, x1 = _apply_timewindow(cells_in, ecf.twindow_size, 0)
             # x2: id data (no twindows needed):
             _legal_ts_x2, x2 = _apply_timewindow(id_worm, 1, kOFF)[-1*kOFF]
             # y: target_cells
-            _legal_ts_y, y1 = _apply_timewindow(cell_worm, 1, kOFF)[-1*kOFF]
+            _legal_ts_y, y1 = _apply_timewindow(cells_out, 1, kOFF)[-1*kOFF]
 
             assert(len(x1) == len(x2))
             assert(len(x1) == len(y))
             x.append([x1, x2])
             y.append(y1)
             # TODO: save legal_ts?
-
-            # TODO: data_weight formulation?
-            # calculate dataweights: T x 
-            # data_weights.append(npr.random([len(x1), num_models]) < data_weight_prob)
         # tensorflow file sets:
-        file_set = utils_tf.build_file_set(x, y, data_weights, os.path.join(temp_dir_name, set_name))
+        file_set, current_absolute_idx = utils_tf.build_file_set(x, y, current_absolute_idx,
+                                                                 os.path.join(temp_dir_name, set_name))
         all_file_sets.append(file_set)
     root_file_set = utils_tf.combine_file_sets(all_file_sets)
+    return root_file_set
+
+
+def general_data_weight_func(N: int, num_model: int,
+                             rng: npr.Generator):
+    """generates data weights for given data set
+    Generating Model: probability of model assignment to datapoint
+        = 1. / num_model
+
+    Args:
+        N (int): number of samples
+        num_model (int): number of total models
+
+    Returns:
+        np.ndarray: N x num_model array of floats
+    """
+    raw = rng.random((N, num_model))
+    pos = 1. * (raw < (1. / num_model))
+    return pos
 
 
 if __name__ == "__main__":
@@ -134,6 +155,43 @@ if __name__ == "__main__":
     # load data sets:
     cell_clusts, id_data, cell_names, set_names = data_loader.load_all_data()
 
+    # ensure cell names constant across sets:
+    for cn in cell_names:
+        assert(all(cell_names[0][i] == cn[i]) for i in range(len(cn)))
+
+
+    # TODO: need better design for data weight
+    # issues?
+    # data weight is a model component... NOT a dataset component
+    # TODO: how to make these things composable???
+    # Ideas?
+    # > data_weight random function that is part of training!
+    # > > takes in total index --> maps to yea/nea
+    # ... hmmm... not sure we have set idx access???
+    # look at tf.dataset docs:
+    # ... YUP: need ids!
+    # TODO: where to add ids?
+    # > file_reps_tf as separate field ~ I think I prefer this...
+    # ... NO! cuz this stuff is for sampling only... not training! BAD!
+    # > as another element of dataset (on top of x, y)
+    # ... something along these lines is better cuz it is property of underlying dataset
+    # ... Idea: just replace data_weight with absolute index...
+    # == absolute restriction is from utils_tf = how to ensure that this is the only way to build?
+
+
+
+    # iter thru experiment configs:
+    for ecf in _get_experiment_configs(cell_names[0]):
+
+        # TODO: update temp_dir_name for current configuration
+        # = each config will have a separate underlying dataset
+        # cuz dataset is preprocessed into independent(ish) samples
+        temp_dir_name_ecf = _format_experiment_config(ecf)
+
+        # convert to tensorflow filesystem:
+        # ~ does some preprocessing as well
+        root_set = _convert_to_tf_filesystem(cell_clusts, id_data, set_names,
+                                             ecf, temp_dir_name_ecf)
 
     # TODO: should probably do multiprocessing somewhere == parallelize across models
     # ... probably... == better from space perspective
@@ -141,7 +199,6 @@ if __name__ == "__main__":
 
     # TODO: complete _convert_to_tf_filesystem
     # ... issue = data_weight formulation = depends on model...
-
 
     # TODO: cv/test sampling
 

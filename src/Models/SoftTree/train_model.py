@@ -6,11 +6,28 @@
     > > all xs (different inputs) will be packaged into a list
 
 """
+import abc
 import tensorflow as tf
 import numpy as np
 from typing import List
 from dataclasses import dataclass
 from Models.SoftTree.model_interfaces import AModel
+
+
+class DataWeightGenerator(abc.ABC):
+    # TODO: might need to make this more general later
+    def gen_data_weights(self, absolute_idxs: tf.Tensor):
+        """maps absolute indexes of a sampel to a data weight matrix
+
+        Args:
+            absolute_idxs (tf.Tensor): absolute indexes
+                assumed to by len N tensor of integers
+
+        Returns:
+            tf.Tensor: data_weights
+                N x num_model
+        """
+        pass
 
 
 @dataclass
@@ -19,7 +36,7 @@ class DataPlan:
     = indices within tf.dataset"""
     x_inds: List[int]
     y_ind: int
-    data_weight_inds: int
+    absolute_idx_ind: int
 
 
 class TrainStep:
@@ -53,7 +70,8 @@ class TrainStep:
 
 
 def _gather_data(dat: tf.data.Dataset,
-                 data_plan: DataPlan):
+                 data_plan: DataPlan,
+                 dw_gen: DataWeightGenerator):
     """gather data from dataset dat
     according to data plan
 
@@ -68,23 +86,27 @@ def _gather_data(dat: tf.data.Dataset,
     """
     x = [dat[i] for i in data_plan.x_inds]
     y = dat[data_plan.y_ind]
-    data_weights = dat[data_plan.data_weight_inds]
-    return x, y, data_weights
+    abs_idx = dat[data_plan.absolute_idx_ind]
+    return x, y, dw_gen.gen_data_weights(abs_idx)
 
 
-def train_epoch(train_dataset: tf.data.Dataset, data_plan: DataPlan,
+def train_epoch(train_dataset: tf.data.Dataset,
+                data_plan: DataPlan,
+                dw_gen: DataWeightGenerator,
                 train_step: TrainStep,
                 epoch_temperature: tf.constant):
     tr_losses = []
     for _step, dat in enumerate(train_dataset):
-        x, y, data_weights = _gather_data(dat, data_plan)
+        x, y, data_weights = _gather_data(dat, data_plan, dw_gen)
         train_step.train(x, y, data_weights, epoch_temperature)
         tr_losses.append(train_step.loss(x, y, data_weights, epoch_temperature).numpy())
     return tr_losses
 
 
-def eval_losses_noreg(train_dataset: tf.data.Dataset, data_plan: DataPlan,
-                        train_step: TrainStep):
+def eval_losses_noreg(train_dataset: tf.data.Dataset,
+                      data_plan: DataPlan,
+                      dw_gen: DataWeightGenerator,
+                      train_step: TrainStep):
     """Get loss without regularization for all samples
 
     Args:
@@ -98,7 +120,7 @@ def eval_losses_noreg(train_dataset: tf.data.Dataset, data_plan: DataPlan,
     """
     combo_losses = []
     for _step, dat in enumerate(train_dataset):
-        x, y, data_weights = _gather_data(dat, data_plan)
+        x, y, data_weights = _gather_data(dat, data_plan, dw_gen)
         c_loss = train_step.loss_samples_noreg(x, y)
         # reshape data_weights:
         N = len(np.shape(c_loss)) - len(np.shape(data_weights))
@@ -108,9 +130,11 @@ def eval_losses_noreg(train_dataset: tf.data.Dataset, data_plan: DataPlan,
     return np.vstack(combo_losses)
 
 
-def train(train_dataset: tf.data.Dataset, data_plan: DataPlan,
-            train_step: TrainStep,
-            num_epoch: int = 3, epoch_temps: List[float] = [1., 1., 1.]):
+def train(train_dataset: tf.data.Dataset,
+          data_plan: DataPlan,
+          dw_gen: DataWeightGenerator,
+          train_step: TrainStep,
+          num_epoch: int = 3, epoch_temps: List[float] = [1., 1., 1.]):
     """Train for a number of epochs
 
     Args:
@@ -126,8 +150,8 @@ def train(train_dataset: tf.data.Dataset, data_plan: DataPlan,
     assert(len(epoch_temps) == num_epoch)
     epoch_tr_losses = []
     for epoch in range(num_epoch):
-        _tr_losses = train_epoch(train_dataset, data_plan, train_step, tf.constant(epoch_temps[epoch]))
+        _tr_losses = train_epoch(train_dataset, data_plan, dw_gen, train_step, tf.constant(epoch_temps[epoch]))
         # evaluate loss for frozen model
-        tr_losses = eval_losses_noreg(train_dataset, data_plan, train_step)
+        tr_losses = eval_losses_noreg(train_dataset, data_plan, dw_gen, train_step)
         epoch_tr_losses.append(np.sum((tr_losses)))
     return epoch_tr_losses
