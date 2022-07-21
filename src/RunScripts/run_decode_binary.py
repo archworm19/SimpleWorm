@@ -9,6 +9,8 @@ import utils_tf
 from dataclasses import dataclass
 from typing import List
 from sampling_utils import cell_sample, common_legal_ts
+from Sampler.set_sampling import get_anml_sample_allt0, get_anml_sample_switch
+from numpy.random import default_rng
 
 
 @dataclass
@@ -23,8 +25,9 @@ class ExperimentConfig:
 
 def _format_experiment_config(ecf: ExperimentConfig):
     """returns a string representation"""
+    str_input_cells = "_".join([str(ic) for ic in ecf.input_cells])
     return "binaryDecode_softForest_twin{0}_inp{1}_targ{2}".format(str(ecf.twindow_size),
-                                                                   str(ecf.input_cells),
+                                                                   str_input_cells,
                                                                    str(ecf.target_cell))
 
 
@@ -70,6 +73,7 @@ def _convert_to_tf_filesystem(cell_clusts: List[List[np.ndarray]],
     NOTE: this file sets created by this function are independent
         of run parameters --> you can run multiple models with
         its output
+    KEY/NOTE: puts y at the center of x-window
     Assumes: set of animals
         > sub-lists = different animal types / setup types
         > arrays = different animals
@@ -86,19 +90,22 @@ def _convert_to_tf_filesystem(cell_clusts: List[List[np.ndarray]],
         # iter thru animals
         for cell_worm, id_worm in zip(cell_set, id_set):
             # cell index selection
-            cells_in = cell_worm[ecf.input_cells]
-            cells_out = cell_worm[ecf.target_cell]
+            cells_in = cell_worm[:,np.array(ecf.input_cells)]
+            cells_out = cell_worm[:,ecf.target_cell]
 
             # timewindow packaging
             # x1: input_cells
             _legal_ts_x1, x1 = _apply_timewindow(cells_in, ecf.twindow_size, 0)
             # x2: id data (no twindows needed):
-            _legal_ts_x2, x2 = _apply_timewindow(id_worm, 1, kOFF)[-1*kOFF]
+            _legal_ts_x2, x2 = _apply_timewindow(id_worm, 1, kOFF)
+            x2 = x2[:-1*kOFF + 1]
             # y: target_cells
-            _legal_ts_y, y1 = _apply_timewindow(cells_out, 1, kOFF)[-1*kOFF]
-
+            _legal_ts_y, y1 = _apply_timewindow(cells_out, 1, kOFF)
+            y1 = y1[:-1*kOFF + 1]
             assert(len(x1) == len(x2))
-            assert(len(x1) == len(y))
+            assert(len(x1) == len(y1))
+            # this check is technically redundent but why not?
+            assert((_legal_ts_x1[0] + kOFF) == _legal_ts_x2[0])
             x.append([x1, x2])
             y.append(y1)
             # TODO: save legal_ts?
@@ -110,25 +117,11 @@ def _convert_to_tf_filesystem(cell_clusts: List[List[np.ndarray]],
     return root_file_set
 
 
-def general_data_weight_func(N: int, num_model: int,
-                             rng: npr.Generator):
-    """generates data weights for given data set
-    Generating Model: probability of model assignment to datapoint
-        = 1. / num_model
-
-    Args:
-        N (int): number of samples
-        num_model (int): number of total models
-
-    Returns:
-        np.ndarray: N x num_model array of floats
-    """
-    raw = rng.random((N, num_model))
-    pos = 1. * (raw < (1. / num_model))
-    return pos
-
-
 if __name__ == "__main__":
+
+    # TODO: should probably do multiprocessing somewhere == parallelize across models
+    # ... probably... == better from space perspective
+
     # experimental params
     twindow_size = 12
     # consecutive t0 windows going in train vs. cross-validation
@@ -140,6 +133,10 @@ if __name__ == "__main__":
     # time params
     time_offset = 0
     time_window = 16
+
+
+    # rngs:
+    rng_sampler = default_rng(42)
 
 
     # Soft Forest Run params:
@@ -159,27 +156,6 @@ if __name__ == "__main__":
     for cn in cell_names:
         assert(all(cell_names[0][i] == cn[i]) for i in range(len(cn)))
 
-
-    # TODO: need better design for data weight
-    # issues?
-    # data weight is a model component... NOT a dataset component
-    # TODO: how to make these things composable???
-    # Ideas?
-    # > data_weight random function that is part of training!
-    # > > takes in total index --> maps to yea/nea
-    # ... hmmm... not sure we have set idx access???
-    # look at tf.dataset docs:
-    # ... YUP: need ids!
-    # TODO: where to add ids?
-    # > file_reps_tf as separate field ~ I think I prefer this...
-    # ... NO! cuz this stuff is for sampling only... not training! BAD!
-    # > as another element of dataset (on top of x, y)
-    # ... something along these lines is better cuz it is property of underlying dataset
-    # ... Idea: just replace data_weight with absolute index...
-    # == absolute restriction is from utils_tf = how to ensure that this is the only way to build?
-
-
-
     # iter thru experiment configs:
     for ecf in _get_experiment_configs(cell_names[0]):
 
@@ -187,19 +163,28 @@ if __name__ == "__main__":
         # = each config will have a separate underlying dataset
         # cuz dataset is preprocessed into independent(ish) samples
         temp_dir_name_ecf = _format_experiment_config(ecf)
+        os.makedirs(temp_dir_name_ecf)
 
         # convert to tensorflow filesystem:
         # ~ does some preprocessing as well
         root_set = _convert_to_tf_filesystem(cell_clusts, id_data, set_names,
                                              ecf, temp_dir_name_ecf)
 
-    # TODO: should probably do multiprocessing somewhere == parallelize across models
-    # ... probably... == better from space perspective
+        # cv/test sampling ~ keep all t0s
+        train_cv_root, test_root = get_anml_sample_allt0(root_set, 0.5, rng_sampler)
 
 
-    # TODO: complete _convert_to_tf_filesystem
-    # ... issue = data_weight formulation = depends on model...
+        # TODO: maybe print the file ids for the sampled sets as a check?
 
-    # TODO: cv/test sampling
+
+        # TODO: there's a design issue where _convert_to_tf...
+        # saves x tensors separetely with the name scheme:
+        # x1, x2
+        # TODO: how to integrate this with DataPlan?
+
+
+        # TODO: need a better run system
+
+
 
     # TODO: we need a helper function to gather all files (exists) and package into single tf dataset

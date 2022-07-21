@@ -4,6 +4,12 @@ from tensorflow.keras.layers import Hashing
 from Models.SoftTree.train_model import DataWeightGenerator
 
 
+# TODO: consider a caching version!
+# Or a run ahead version!
+# ... with tf.gather...
+# --> would be substantially faster!
+
+
 class NullDWG(DataWeightGenerator):
     # return 1 for everything
     def __init__(self, num_model: int,

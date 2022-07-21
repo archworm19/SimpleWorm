@@ -31,9 +31,9 @@ def build_file_wrapper(x: List[np.ndarray], y: np.ndarray,
         assert(len(xi) == T), "0th axis must be time axis for all arrays"
     
     # make the tf records file
-    np_map = {"x_{0}".format(i): x[i] for i in range(len(x))}
+    np_map = {"x{0}".format(i): x[i] for i in range(len(x))}
     np_map["y"] = y
-    np_map["absolute_idx"] = np.arange(current_absolute_idx, T)
+    np_map["absolute_idx"] = np.arange(current_absolute_idx, current_absolute_idx + T)
     write_numpy_to_tfr(fn, np_map)
 
     # make the file wrapper:
@@ -42,8 +42,8 @@ def build_file_wrapper(x: List[np.ndarray], y: np.ndarray,
 
 
 def build_file_set(x: List[List[np.ndarray]], y: List[np.ndarray],
-                    current_absolute_idx: int,
-                            base_fn: str):
+                   current_absolute_idx: int,
+                   base_fn: str):
     """Build a file set of tensorflow filewrappers
 
     Args:
@@ -66,7 +66,7 @@ def build_file_set(x: List[List[np.ndarray]], y: List[np.ndarray],
         fn = "{0}_{1}".format(base_fn, str(i))
         fw, current_absolute_idx = build_file_wrapper(x[i], y[i], current_absolute_idx, fn)
         file_wraps.append(fw)
-    return FileSet([], file_wraps)
+    return FileSet([], file_wraps), current_absolute_idx
 
 
 def combine_file_sets(file_sets: List[FileSet]):
