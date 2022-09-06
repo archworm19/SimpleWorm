@@ -67,8 +67,8 @@
                 <mxCell id="40" value="Inputs" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;" vertex="1" parent="39">
                     <mxGeometry y="30" width="80" height="30" as="geometry"/>
                 </mxCell>
-                <mxCell id="41" value="sampled_dataset_root: DataSet" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;" vertex="1" parent="39">
-                    <mxGeometry y="60" width="190" height="30" as="geometry"/>
+                <mxCell id="41" value="sampled_dataset_root: DataGroup" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;" vertex="1" parent="39">
+                    <mxGeometry y="60" width="200" height="30" as="geometry"/>
                 </mxCell>
                 <mxCell id="42" value="src_sampler: SourceSampler" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;" vertex="1" parent="39">
                     <mxGeometry y="90" width="180" height="30" as="geometry"/>
