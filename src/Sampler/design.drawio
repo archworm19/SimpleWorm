@@ -20,7 +20,7 @@
                     <mxGeometry y="30" width="150" height="30" as="geometry"/>
                 </mxCell>
                 <mxCell id="10" value="sub_sets: List[DataGroup]" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;" vertex="1" parent="8">
-                    <mxGeometry y="60" width="140" height="30" as="geometry"/>
+                    <mxGeometry y="60" width="150" height="30" as="geometry"/>
                 </mxCell>
                 <mxCell id="11" value="DataSourceInMemory" style="swimlane;" vertex="1" parent="1">
                     <mxGeometry x="650" y="90" width="200" height="130" as="geometry"/>
