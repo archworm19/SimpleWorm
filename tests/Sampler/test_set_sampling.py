@@ -1,9 +1,9 @@
 """Set sampling tests"""
 import numpy as np
 import numpy.random as npr
-from Sampler.set_sampling import (DataGroup, _split_leaves, _split,
+from Sampler.set_sampling import (DataGroup, _split,
                                   gather_leaves, split_leaves)
-from Sampler.source_sampling import DataSource
+from Sampler.data_source import DataSourceIM
 
 
 def test_split():
@@ -18,10 +18,10 @@ def test_split():
 
 def _make_fake_tree():
     # fake source
-    class FakeSource(DataSource):
+    class FakeSource(DataSourceIM):
         def __init__(self, idx):
             self.idx = idx
-        def get_numpy_data(self):
+        def get_numpy_data(self, target_columns, train_mode):
             return {"A": np.arange(self.idx),
                     "B": np.arange(self.idx)}
     
@@ -36,7 +36,7 @@ def test_gather_leaves():
     parent = _make_fake_tree()
     lvs = gather_leaves(parent)
     assert(len(lvs) == 4)
-    lv_dat_A = np.concatenate([lv.get_numpy_data()["A"] for lv in lvs], axis=0)
+    lv_dat_A = np.concatenate([lv.get_numpy_data(["A"], True)["A"] for lv in lvs], axis=0)
     assert(np.all(lv_dat_A == np.concatenate([np.arange(10),
                                               np.arange(20),
                                               np.arange(15),
@@ -47,16 +47,16 @@ def test_split_leaves():
     rng = npr.default_rng(42)
     parent = _make_fake_tree()
     prime_root, comp_root = split_leaves(parent, rng, 0.5)
-    lv_dat_A = np.concatenate([lv.get_numpy_data()["A"]
+    lv_dat_A = np.concatenate([lv.get_numpy_data(["A"], True)["A"]
                                for lv in gather_leaves(prime_root)],
                               axis=0)
     assert(np.all(lv_dat_A == np.concatenate([np.arange(20),
-                                              np.arange(25)])))
-    lv_dat_A = np.concatenate([lv.get_numpy_data()["A"]
+                                              np.arange(15)])))
+    lv_dat_A = np.concatenate([lv.get_numpy_data(["A"], True)["A"]
                                for lv in gather_leaves(comp_root)],
                               axis=0)
     assert(np.all(lv_dat_A == np.concatenate([np.arange(10),
-                                              np.arange(15)])))
+                                              np.arange(25)])))
 
 
 if __name__ == "__main__":
