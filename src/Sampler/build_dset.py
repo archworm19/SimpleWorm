@@ -18,7 +18,7 @@ class TFTransform(abc.ABC):
 class TFTransformConstant(TFTransform):
     # constant transform to tensor (and enforce single type)
 
-    def __init__(self, dtype: tf.Dtype):
+    def __init__(self, dtype: tf.dtypes.DType):
         self.dtype = dtype
 
     def transform(self, dat: Dict[str, np.ndarray]) -> Dict[str, tf.Tensor]:
