@@ -8,12 +8,12 @@ import numpy as np
 import numpy.random as npr
 from typing import List
 from dataclasses import dataclass
-from source_sampling import DataSource
+from Sampler.data_source import DataSourceIM
 
 
 @dataclass
 class DataGroup:
-    data_src: List[DataSource]
+    data_src: List[DataSourceIM]
     sub_sets: List  # List of DataGroup(s)
 
 
@@ -25,6 +25,9 @@ def gather_leaves(grp_root: DataGroup):
 
     Args:
         grp_root (DataGroup): root of group
+
+    Returns:
+        List[DataSourceIM]: data sources at leaves
     """
     if grp_root.sub_sets is None or len(grp_root.sub_sets) == 0:
         return [ds for ds in grp_root.data_src]
