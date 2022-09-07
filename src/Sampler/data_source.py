@@ -41,9 +41,9 @@ class DataSourceAlternating(DataSourceIM):
 
     def _get_indices(self, train_mode: bool, num_samples: int):
         if train_mode:
-            use_bit = self.chunk_0bit
+            use_bit = self.chunk0_bit
         else:
-            use_bit = not self.chunk_0bit
+            use_bit = not self.chunk0_bit
         ret_inds = []
         for i in range(0, num_samples, self.chunk_size):
             if use_bit:
