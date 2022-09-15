@@ -1,10 +1,10 @@
-"""SoftForest"""
+"""Softtree"""
 import tensorflow as tf
 from typing import List
 from Models.SoftTree.klayers import MultiDense
 
 
-def _build_forest_node(width: int,
+def _build_tree_node(width: int,
                        inps: List[tf.keras.Input]):
     # build layers for each input --> add the result
     # with only 0th dim parallel --> batch_size x width
@@ -12,7 +12,7 @@ def _build_forest_node(width: int,
     return tf.math.add_n(mv)
 
 
-def _build_forest(weight: tf.Tensor,
+def _build_tree(weight: tf.Tensor,
                   depth: int,
                   width: int,
                   inps: List[tf.keras.Input]):
@@ -23,21 +23,21 @@ def _build_forest(weight: tf.Tensor,
         return [weight]
     # make the next layer --> child call for each
     # --> batch_size x width
-    v = _build_forest_node(width, inps)
+    v = _build_tree_node(width, inps)
     v_norm = tf.nn.softmax(v, axis=-1)
     res = []
     for i in range(width):
-        res.extend(_build_forest(v_norm[:,i] * weight, depth-1, width, inps))
+        res.extend(_build_tree(v_norm[:,i] * weight, depth-1, width, inps))
     return res
 
 
-def build_forest(depth: int,
+def build_tree(depth: int,
                  width: int,
                  inps: List[tf.keras.Input]):
-    """build forest network
+    """build tree network
 
     Args:
-        depth (int): forest depth
+        depth (int): tree depth
             depth = 1 --> just the root node
         width (int): width of each node of the tree
             = number of outputs from each node
@@ -49,7 +49,7 @@ def build_forest(depth: int,
     """
     assert(depth > 0)
     assert(width > 1)
-    v = _build_forest(tf.constant(1.0, dtype=inps[0].dtype),
+    v = _build_tree(tf.constant(1.0, dtype=inps[0].dtype),
                       depth, width, inps)
     return tf.stack(v, axis=1)
 
