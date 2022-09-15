@@ -1,14 +1,14 @@
 """SoftForest"""
 import tensorflow as tf
 from typing import List
-from klayers import MultiDense
+from Models.SoftTree.klayers import MultiDense
 
 
 def _build_forest_node(width: int,
                        inps: List[tf.keras.Input]):
     # build layers for each input --> add the result
     # with only 0th dim parallel --> batch_size x width
-    mv = [MultiDense([0], width)(inp) for inp in inps]
+    mv = [MultiDense([], width)(inp) for inp in inps]
     return tf.math.add_n(mv)
 
 
@@ -26,7 +26,7 @@ def _build_forest(weight: tf.Tensor,
     v = _build_forest_node(width, inps)
     v_norm = tf.nn.softmax(v, axis=-1)
     res = []
-    for i in range(len(width)):
+    for i in range(width):
         res.extend(_build_forest(v_norm[:,i] * weight, depth-1, width, inps))
     return res
 
@@ -51,7 +51,7 @@ def build_forest(depth: int,
     assert(width > 1)
     v = _build_forest(tf.constant(1.0, dtype=inps[0].dtype),
                       depth, width, inps)
-    return tf.concat(v, axis=1)
+    return tf.stack(v, axis=1)
 
 
 # TODO: we need the following network aggregators:
