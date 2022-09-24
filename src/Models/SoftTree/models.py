@@ -14,31 +14,44 @@ def build_binary_tree_predictor(inps: List[tf.keras.Input]):
     return tf.math.add_n(mv)
 
 
+def build_parallel_binary_preds(inps: List[tf.keras.Input],
+                                num_tree: int,
+                                num_state: int):
+    # inps = batch_size x d1 x ...
+    # returns: logits ~ batch_size x num_tree x num_state
+    yz = []
+    for inpi in inps:
+        x = tf.expand_dims(inpi, 1)
+        x = tf.expand_dims(x, 1)
+        x = tf.repeat(x, num_tree, 1)
+        x = tf.repeat(x, num_state, 2)
+        yz.append(MultiDense([0, 1], 1)(x))
+    return tf.math.add_n(yz)[:, :, :, 0]
+
+
+
 def build_fweighted_linear_pred(inps: List[tf.keras.Input],
                                 num_tree: int,
                                 depth: int,
                                 width: int):
     # forest weighted linear predictor
 
-    # TODO: add in optional x2 tensor argument?
+    # TODO: missing mask for loss
+    # mask = batch_size x num_tree
+    # ... each tree gets a subset of the input sample!!!
 
-    layer_factories = [StandardLayerFactory(width) for _ in inps]
+    layer_factories = [StandardLayerFactory(width, num_tree) for _ in inps]
     # --> batch_size x num_tree x num_state
     states = build_forest(depth, width, inps, layer_factories)
-    # build a linear predictor for each state/tree
-    losses, wpred = [], []
-    for z in int(depth**width):
-        # TODO: can we use binary cross entropy loss?
+    # build parallel predictors:
+    preds = build_parallel_binary_preds(inps, num_tree, depth**width)
 
-        # TODO: averaging in the logit domain... does that make sense?
-        # add state-weighted prediction
-        # shape = batch_size x num_tree
-        wpred.append(states[:,:,z] * build_binary_tree_predictor(inps))
+    # TODO: if x2 supplied (as logits) --> add to preds (BOOST)
 
-    # mean prediction across trees (random forest) --> batch_size
-    # NOTE: in logit space TODO: DOCSTRING
-    sum_pred = tf.math.add_n(wpred)
-    mu_pred = tf.math.divide(sum_pred,
-                             tf.constant(depth**width, dtype=sum_pred.dtype))
+    # TODO: parallel loss
 
-    # TODO: still need loss
+    # TODO: average prediction (RANDOM FOREST)
+    # NOTE: no mask
+    # > weighted sum across states > average across trees
+    w_ave = tf.math.reduce_sum(states * preds, axis=2)
+    pred_mu = tf.math.reduce_mean(w_ave, axis=1)
