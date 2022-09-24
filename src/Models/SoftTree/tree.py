@@ -2,6 +2,7 @@
 import abc
 import tensorflow as tf
 from typing import List
+from tensorflow.keras.backend import int_shape
 from Models.SoftTree.klayers import MultiDense
 
 
@@ -11,7 +12,7 @@ class LayerFactory(abc.ABC):
         """build via keras functional api
 
         Args:
-            x (tf.keras.Input):
+            x (tf.keras.Input): batch_size x num_tree x ...
 
         Returns:
             tf.Tensor: shape = batch_size x num_tree x tree_width
@@ -33,14 +34,11 @@ class StandardTreeLayerFactory(LayerFactory):
         self.tree_dim = 0
 
     def func_build(self, x: tf.Tensor):
-        # expects batch_size x d1 x ... input
-        # tile to add trees in 1st dim
-        # --> batch_size x num_tree x d1 x ...
-        # TODO: tiling should maybe be in the tree itself
+        # expects batch_size x 1 x d1 x ... input
+        # returns: batch_size x num_tree x width
+        x = tf.repeat(x, self.num_tree, 1)
         M = MultiDense([self.tree_dim], self.width)
-        xbig = tf.repeat(tf.expand_dims(x, 1), self.num_tree)
-        y = M(xbig)
-        return y, M
+        return M(x), M
 
     def get_width(self) -> int:
         return self.width
@@ -53,9 +51,12 @@ def _build_forest_node(inps: List[tf.keras.Input],
                        layer_factories: List[LayerFactory]):
     # build layers for each input --> add the result
     # with only 0th dim parallel --> batch_size x num_tree x width
+    # input = batch_size x d1 x ...
     yz = []
     for lf, inpi in zip(layer_factories, inps):
-        y, _ = lf.func_build(inpi)
+        # parallelize inp across trees:
+        y, _ = lf.func_build(tf.expand_dims(inpi, 1))
+        assert len(int_shape(y)) == 3
         yz.append(y)
     return tf.math.add_n(yz)
 
@@ -73,29 +74,25 @@ def _build_forest(weight: tf.Tensor,
     # make the next layer --> child call for each
     # --> batch_size x num_tree x width
     v = _build_forest_node(inps, layer_factories)
-
-    print(v)
-    input('cont?')
-
     v_norm = tf.nn.softmax(v, axis=-1)
     res = []
     for i in range(width):
-        res.extend(_build_forest(v_norm[:, :, i] * weight, depth-1, width, inps,
+        res.extend(_build_forest(v_norm[:, :, i] * weight, width, depth-1, inps,
                                     layer_factories))
     return res
 
 
-def build_forest(depth: int,
-                 width: int,
+def build_forest(width: int,
+                 depth: int,
                  inps: List[tf.keras.Input],
                  layer_factories: List[LayerFactory]):
     """build tree network
 
     Args:
-        depth (int): tree depth
-            depth = 1 --> just the root node
         width (int): width of each node of the tree
             = number of outputs from each node
+        depth (int): tree depth
+            depth = 1 --> just the root node
         inps (List[tf.keras.Input]): all inputs
 
     Returns:
@@ -110,5 +107,5 @@ def build_forest(depth: int,
     for lf in layer_factories[1:]:
         assert num_trees == lf.get_num_trees()
     v = _build_forest(tf.constant(1.0, dtype=inps[0].dtype),
-                      depth, width, inps, layer_factories)
+                      width, depth, inps, layer_factories)
     return tf.stack(v, axis=2)

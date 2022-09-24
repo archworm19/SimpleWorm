@@ -50,20 +50,20 @@ def test_build():
                             dtype=tf.float32)
         x = build_forest(width, depth, [inp1, inp2],
                          tfacts)
-        print(x)
-        assert(int_shape(x) == (None, width**depth, tfacts[0].get_num_trees()))
+        assert(int_shape(x) == (None, tfacts[0].get_num_trees(), width**depth))
 
 
 def test_fnorm():
     x = 10. * tf.ones([5, 3, 4])
     depth = 2
     width = 3
-    x = build_tree(depth, width, [x])
-    assert(tf.math.reduce_all(tf.math.abs(tf.math.reduce_sum(x, axis=1) - 1.0) < .001))
+    x = build_forest(width, depth, [x],
+                     [StandardTreeLayerFactory(width, 1)])
+    assert(tf.math.reduce_all(tf.math.abs(tf.math.reduce_sum(x, axis=-1) - 1.0) < .001))
 
 
 if __name__ == "__main__":
     test_multi_dense()
     test_multi_dense_parallel()
     test_build()
-    #test_fnorm()
+    test_fnorm()
