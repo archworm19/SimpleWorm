@@ -1,17 +1,9 @@
 """Assembled keras model"""
 import tensorflow as tf
-from typing import Tuple, List
-from dataclasses import dataclass
+from typing import List
 from tree import build_forest, StandardLayerFactory
 from Models.SoftTree.klayers import MultiDense
-
-
-def build_binary_tree_predictor(inps: List[tf.keras.Input]):
-    # linear model logits --> batch_size x num_tree
-    tree_dim = 0
-    mv = [MultiDense([tree_dim], 1)(inpi)[:,:,0]
-            for inpi in inps]
-    return tf.math.add_n(mv)
+from Models.SoftTree.loss_funcs import binary_loss
 
 
 def build_parallel_binary_preds(inps: List[tf.keras.Input],
@@ -29,29 +21,60 @@ def build_parallel_binary_preds(inps: List[tf.keras.Input],
     return tf.math.add_n(yz)[:, :, :, 0]
 
 
-
-def build_fweighted_linear_pred(inps: List[tf.keras.Input],
+def build_fweighted_linear_pred(inps: List[tf.Tensor],
+                                target: tf.Tensor,
+                                sample_mask: tf.Tensor,
                                 num_tree: int,
                                 depth: int,
-                                width: int):
-    # forest weighted linear predictor
+                                width: int,
+                                x2: tf.Tensor = None):
+    """forest weighted linear predictor
+    NOTE: boosting is done in logit space while averaging
+        is done in probability space
 
-    # TODO: missing mask for loss
-    # mask = batch_size x num_tree
-    # ... each tree gets a subset of the input sample!!!
+    Args:
+        inps (List[tf.Tensor]): model inputs
+            each input should be batch_size x d1 x ...
+        target (tf.Tensor): model target
+            binary tensor
+            shape = batch_size
+        sample_mask (tf.Tensor): mask on sample-tree combos
+            = enforces random forest = training diff trees on diff samples
+            = batch_size x num_tree
+        num_tree (int): number of tree
+        depth (int): tree depth
+        width (int): tree_width
+            number of states = width**depth
+        x2 (tf.Tensor): if supplied --> tensor is added to model
+            logits = implements boosting
+            shape = batch_size
 
+    Returns:
+        Dict[str, tf.Tensor]: named model outputs --> package into keras model
+    """
     layer_factories = [StandardLayerFactory(width, num_tree) for _ in inps]
     # --> batch_size x num_tree x num_state
     states = build_forest(depth, width, inps, layer_factories)
     # build parallel predictors:
     preds = build_parallel_binary_preds(inps, num_tree, depth**width)
 
-    # TODO: if x2 supplied (as logits) --> add to preds (BOOST)
+    # if x2 supplied (as logits) --> add to preds (BOOST)
+    if x2 is not None:
+        preds = preds + tf.reshape(x2, [-1, 1, 1])
 
-    # TODO: parallel loss
+    # parallel loss
+    # > loss computed for each tree separately
+    parallel_loss = binary_loss(preds, tf.reshape(target, [-1, 1, 1]),
+                                states * tf.expand_dims(sample_mask, 2))
 
-    # TODO: average prediction (RANDOM FOREST)
+    # Taverage prediction (RANDOM FOREST)
     # NOTE: no mask
     # > weighted sum across states > average across trees
-    w_ave = tf.math.reduce_sum(states * preds, axis=2)
+    prob_preds = tf.math.sigmoid(preds)
+    w_ave = tf.math.reduce_sum(states * prob_preds, axis=2)
     pred_mu = tf.math.reduce_mean(w_ave, axis=1)
+
+    return {"loss": tf.math.reduce_mean(parallel_loss),
+            "logit_predictions": preds,
+            "predictions": prob_preds,
+            "average_predictions": pred_mu}
