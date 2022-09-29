@@ -41,11 +41,11 @@ def binary_loss(predictions: tf.Tensor,
     # norm term = logsumexp
     K = tf.math.log(tf.math.exp(predictions) + 1)
     # primary term
-    yp = y * predictions
+    yp = tf.cast(y, predictions.dtype) * predictions
     log_like = yp - K
     if mask is None:
         return -1 * log_like
-    return -1 * log_like * mask
+    return -1 * log_like * tf.cast(mask, log_like.dtype)
 
 
 def quantile_loss(predictions: tf.Tensor,

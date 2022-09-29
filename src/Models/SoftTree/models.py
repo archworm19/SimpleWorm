@@ -1,7 +1,7 @@
 """Assembled keras model"""
 import tensorflow as tf
 from typing import List
-from tree import build_forest, StandardLayerFactory
+from Models.SoftTree.tree import build_forest, StandardTreeLayerFactory
 from Models.SoftTree.klayers import MultiDense
 from Models.SoftTree.loss_funcs import binary_loss
 
@@ -52,11 +52,11 @@ def build_fweighted_linear_pred(inps: List[tf.Tensor],
     Returns:
         Dict[str, tf.Tensor]: named model outputs --> package into keras model
     """
-    layer_factories = [StandardLayerFactory(width, num_tree) for _ in inps]
+    layer_factories = [StandardTreeLayerFactory(width, num_tree) for _ in inps]
     # --> batch_size x num_tree x num_state
-    states = build_forest(depth, width, inps, layer_factories)
+    states = build_forest(width, depth, inps, layer_factories)
     # build parallel predictors:
-    preds = build_parallel_binary_preds(inps, num_tree, depth**width)
+    preds = build_parallel_binary_preds(inps, num_tree, width**depth)
 
     # if x2 supplied (as logits) --> add to preds (BOOST)
     if x2 is not None:
@@ -74,7 +74,9 @@ def build_fweighted_linear_pred(inps: List[tf.Tensor],
     w_ave = tf.math.reduce_sum(states * prob_preds, axis=2)
     pred_mu = tf.math.reduce_mean(w_ave, axis=1)
 
-    return {"loss": tf.math.reduce_mean(parallel_loss),
+    # reduce sum error across states --> average across trees and batch
+    # ... cuz scaled by vector that is normalized across states
+    return {"loss": tf.math.reduce_mean(tf.math.reduce_sum(parallel_loss, axis=2)),
             "logit_predictions": preds,
             "predictions": prob_preds,
             "average_predictions": pred_mu}
