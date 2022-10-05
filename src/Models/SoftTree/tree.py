@@ -109,3 +109,32 @@ def build_forest(width: int,
     v = _build_forest(tf.constant(1.0, dtype=inps[0].dtype),
                       width, depth, inps, layer_factories)
     return tf.stack(v, axis=2)
+
+
+# forest specific loss functions
+
+
+def forest_reg_loss(forest_output: tf.Tensor,
+                    reg_strength: tf.Tensor):
+    """Forest regularization loss
+    Recommended use: make this penalty strong initially
+        --> relax it in later training iterations
+
+    Args:
+        forest_output (tf.Tensor): forest output states
+            assumed to be batch_size x num_forest x num_state
+            but will work for ... x num_state
+        reg_strength (tf.Tensor): regularization strength
+            assumed to have shape batch_size
+
+    Returns:
+        tf.Tensor: scalar tensor loss
+    """
+    # goal = maximize entropy across states
+    # --> minimize negentropy
+    negent = tf.math.reduce_sum(forest_output *
+                                tf.math.log(forest_output),
+                                axis=-1)
+    rs = tf.expand_dims(reg_strength, 1)
+    # average across trees and batches
+    return tf.math.reduce_mean(negent * tf.stop_gradient(rs))

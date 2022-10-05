@@ -1,7 +1,8 @@
 """Assembled keras model"""
 import tensorflow as tf
 from typing import List
-from Models.SoftTree.tree import build_forest, StandardTreeLayerFactory
+from Models.SoftTree.tree import (build_forest, StandardTreeLayerFactory,
+                                  forest_reg_loss)
 from Models.SoftTree.klayers import MultiDense
 from Models.SoftTree.loss_funcs import binary_loss
 
@@ -21,9 +22,11 @@ def build_parallel_binary_preds(inps: List[tf.keras.Input],
     return tf.math.add_n(yz)[:, :, :, 0]
 
 
+# TODO: what about regularization penalty???
 def build_fweighted_linear_pred(inps: List[tf.Tensor],
                                 target: tf.Tensor,
                                 sample_mask: tf.Tensor,
+                                forest_reg_penalty: tf.Tensor,
                                 num_tree: int,
                                 depth: int,
                                 width: int,
@@ -31,6 +34,8 @@ def build_fweighted_linear_pred(inps: List[tf.Tensor],
     """forest weighted linear predictor
     NOTE: boosting is done in logit space while averaging
         is done in probability space
+    NOTE: inps, target, sample_mask, forest_reg_penalty
+        can be tensors or keras inputs
 
     Args:
         inps (List[tf.Tensor]): model inputs
@@ -41,6 +46,9 @@ def build_fweighted_linear_pred(inps: List[tf.Tensor],
         sample_mask (tf.Tensor): mask on sample-tree combos
             = enforces random forest = training diff trees on diff samples
             = batch_size x num_tree
+        forest_reg_penalty (tf.Tensor): forest regularization penalty
+            Recommendation: make large early in training --> relax
+            == discourages early bad solns
         num_tree (int): number of tree
         depth (int): tree depth
         width (int): tree_width
@@ -66,6 +74,8 @@ def build_fweighted_linear_pred(inps: List[tf.Tensor],
     # > loss computed for each tree separately
     parallel_loss = binary_loss(preds, tf.reshape(target, [-1, 1, 1]),
                                 states * tf.expand_dims(sample_mask, 2))
+    red_parallel_loss = tf.math.reduce_mean(tf.math.reduce_sum(parallel_loss, axis=2))
+    f_loss = forest_reg_loss(states, forest_reg_penalty)
 
     # Taverage prediction (RANDOM FOREST)
     # NOTE: no mask
@@ -76,7 +86,7 @@ def build_fweighted_linear_pred(inps: List[tf.Tensor],
 
     # reduce sum error across states --> average across trees and batch
     # ... cuz scaled by vector that is normalized across states
-    return {"loss": tf.math.reduce_mean(tf.math.reduce_sum(parallel_loss, axis=2)),
+    return {"loss": red_parallel_loss + f_loss,
             "logit_predictions": preds,
             "predictions": prob_preds,
             "average_predictions": pred_mu}
