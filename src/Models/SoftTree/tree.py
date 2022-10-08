@@ -142,10 +142,6 @@ def forest_reg_loss(forest_output: tf.Tensor,
     return tf.math.reduce_mean(negent * tf.stop_gradient(rs))
 
 
-# TODO: design for making forest into custom keras layer
-# > idea 1: takes in tensors ~ don't have to bother with factory
-# > > what shape? batch_size x num_tree x total_nodes x width
-# ... total_nodes = width^depth --> depth = log(total_node) / log(width)
 class Forest(keras.layers.Layer):
 
     def __init__(self):
@@ -183,10 +179,8 @@ class Forest(keras.layers.Layer):
         # TODO: docstring
         # weight = batch_size x num_tree
         # inp_tensor = batch_size x num_tree x total_nodes x width
-
         if depth == 0:
             return [weight], inp_ind
-        print("inp ind " + str(inp_ind))
         res = []
         # pull and softmax current layer
         # --> batch_size x num_tree x width
@@ -219,9 +213,29 @@ class Forest(keras.layers.Layer):
         return tf.stack(v, axis=-1)
 
 
+# TODO: make a linear forest layer
+
 if __name__ == "__main__":
     # test out layer
+    # depth = 1
     v = tf.ones([8, 5, 3, 2])
     vout = Forest()(v)
     print(vout)
     print(tf.math.reduce_sum(vout, axis=-1))
+    # test with more complex size:
+    # depth = 2; width = 3
+    v = tf.ones([8, 5, 1 + 3 + 9, 3])
+    F = Forest()
+    vout = F(v)
+    print(vout)
+    print(tf.math.reduce_sum(vout, axis=-1))
+    # super important test:
+    _, next_ind = F._eval_forest(v, tf.constant(1.), 3, 3, 0)
+    print(next_ind)
+    assert next_ind == tf.shape(v)[2]
+
+    # what if I use a keras tensor:
+    v2 = tf.keras.Input((5, 1 + 3 + 9, 3))
+    vout = Forest()(v2)
+    model = tf.keras.Model(inputs=v2, outputs=vout)
+    model(v)
