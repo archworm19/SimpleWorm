@@ -1,6 +1,8 @@
 """Softtree"""
 import abc
 import tensorflow as tf
+import keras
+import numpy as np
 from typing import List
 from tensorflow.keras.backend import int_shape
 from Models.SoftTree.klayers import MultiDense
@@ -138,3 +140,88 @@ def forest_reg_loss(forest_output: tf.Tensor,
     rs = tf.expand_dims(reg_strength, 1)
     # average across trees and batches
     return tf.math.reduce_mean(negent * tf.stop_gradient(rs))
+
+
+# TODO: design for making forest into custom keras layer
+# > idea 1: takes in tensors ~ don't have to bother with factory
+# > > what shape? batch_size x num_tree x total_nodes x width
+# ... total_nodes = width^depth --> depth = log(total_node) / log(width)
+class Forest(keras.layers.Layer):
+
+    def __init__(self):
+        super(Forest, self).__init__()
+
+    def _depth_calc(self, input_shape):
+        [batch_size, num_tree, total_nodes, width] = input_shape
+        depth_num = np.log(1 - total_nodes * (1 - width))
+        depth_denom = np.log(width)
+        depth = int(depth_num / depth_denom - 1)
+        tot_recon = sum([width**z for z in range(depth + 1)])
+        assert tot_recon == total_nodes
+        return depth
+
+    def build(self, input_shape):
+        # TODO: docstring
+        # assumes shape = batch_size x num_tree x total_nodes x width
+        # total_nodes = geometric series
+        #   = sum_{k=0}^{n}r^k = (1 - r^{n+1}) / (1 - r)
+        #   [total_nodes] * (1 - r) = (1 - r^{n+1})
+        #   r^{n+1} = 1 - [total_nodes] * (1 - r)
+        #   n+1 = log(1 - [total_nodes] * (1 - r)) / log(r)
+        # ... r = width
+        depth = self._depth_calc(input_shape)
+        self.depth = depth
+        self.width = input_shape[-1]
+        self.init_weight = tf.constant(1.)
+
+    def _eval_forest(self,
+                     inp_tensor: tf.Tensor,
+                     weight: tf.Tensor,
+                     depth: int,
+                     width: int,
+                     inp_ind: int):
+        # TODO: docstring
+        # weight = batch_size x num_tree
+        # inp_tensor = batch_size x num_tree x total_nodes x width
+
+        if depth == 0:
+            return [weight], inp_ind
+        print("inp ind " + str(inp_ind))
+        res = []
+        # pull and softmax current layer
+        # --> batch_size x num_tree x width
+        v_norm = tf.nn.softmax(inp_tensor[:, :, inp_ind, :], axis=-1)
+        res = []
+        next_ind = inp_ind + 1
+        for i in range(width):
+            r, next_ind = self._eval_forest(inp_tensor,
+                                            v_norm[:, :, i] * weight,
+                                            depth - 1, width,
+                                            next_ind)
+            res.extend(r)
+        return res, next_ind
+
+    def call(self, inputs):
+        """Get tree probabilities ~ softmaxed across states
+
+        Args:
+            inputs (tf.Tensor):
+                batch_size x num_tree x total_nodes x width
+
+        Returns:
+            tf.Tensor:
+                batch_size x num_tree x output_states
+                output_states = width**depth
+        """
+        v, _ = self._eval_forest(inputs,
+                                 tf.cast(self.init_weight, dtype=inputs.dtype),
+                                 self.depth + 1, self.width, 0)
+        return tf.stack(v, axis=-1)
+
+
+if __name__ == "__main__":
+    # test out layer
+    v = tf.ones([8, 5, 3, 2])
+    vout = Forest()(v)
+    print(vout)
+    print(tf.math.reduce_sum(vout, axis=-1))
