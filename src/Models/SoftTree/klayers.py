@@ -40,6 +40,7 @@ class MultiDense(keras.layers.Layer):
 
     def call(self, inputs):
         # linear inner produce ~ no activation unit
+        # output shape = batch_size x parallel_dims x num_output
         return (tf.math.reduce_sum(tf.expand_dims(self.w, 0) *
                                    tf.expand_dims(inputs, -1),
                                    axis=self.reduce_dims)

@@ -1,121 +1,15 @@
 """Softtree"""
-import abc
 import tensorflow as tf
 import keras
 import numpy as np
 from typing import List
-from tensorflow.keras.backend import int_shape
 from Models.SoftTree.klayers import MultiDense
-
-
-class LayerFactory(abc.ABC):
-
-    def func_build(self, x: tf.Tensor) -> tf.Tensor:
-        """build via keras functional api
-
-        Args:
-            x (tf.keras.Input): batch_size x num_tree x ...
-
-        Returns:
-            tf.Tensor: shape = batch_size x num_tree x tree_width
-            tf.keras.layers.Layer
-        """
-        pass
-
-    def get_width(self) -> int:
-        pass
-
-    def get_num_trees(self) -> int:
-        pass
-
-
-class StandardTreeLayerFactory(LayerFactory):
-    def __init__(self, width: int, num_tree: int):
-        self.width = width
-        self.num_tree = num_tree
-        self.tree_dim = 0
-
-    def func_build(self, x: tf.Tensor):
-        # expects batch_size x 1 x d1 x ... input
-        # returns: batch_size x num_tree x width
-        x = tf.repeat(x, self.num_tree, 1)
-        M = MultiDense([self.tree_dim], self.width)
-        return M(x), M
-
-    def get_width(self) -> int:
-        return self.width
-
-    def get_num_trees(self) -> int:
-        return self.num_tree
-
-
-def _build_forest_node(inps: List[tf.keras.Input],
-                       layer_factories: List[LayerFactory]):
-    # build layers for each input --> add the result
-    # with only 0th dim parallel --> batch_size x num_tree x width
-    # input = batch_size x d1 x ...
-    yz = []
-    for lf, inpi in zip(layer_factories, inps):
-        # parallelize inp across trees:
-        y, _ = lf.func_build(tf.expand_dims(inpi, 1))
-        assert len(int_shape(y)) == 3
-        yz.append(y)
-    return tf.math.add_n(yz)
-
-
-def _build_forest(weight: tf.Tensor,
-                  width: int,
-                  depth: int,
-                  inps: List[tf.keras.Input],
-                  layer_factories: List[LayerFactory]):
-    # recursive helper:
-    # ASSUMES: weight = batch_size x forest
-    # Returns: weights from end layers
-    if depth == 0:
-        return [weight]
-    # make the next layer --> child call for each
-    # --> batch_size x num_tree x width
-    v = _build_forest_node(inps, layer_factories)
-    v_norm = tf.nn.softmax(v, axis=-1)
-    res = []
-    for i in range(width):
-        res.extend(_build_forest(v_norm[:, :, i] * weight, width, depth-1, inps,
-                                    layer_factories))
-    return res
-
-
-def build_forest(width: int,
-                 depth: int,
-                 inps: List[tf.keras.Input],
-                 layer_factories: List[LayerFactory]):
-    """build tree network
-
-    Args:
-        width (int): width of each node of the tree
-            = number of outputs from each node
-        depth (int): tree depth
-            depth = 1 --> just the root node
-        inps (List[tf.keras.Input]): all inputs
-
-    Returns:
-        tf.Tensor: batch_size x num_forest x M
-            where M = sum of bottom layer widths
-    """
-    assert(depth > 0)
-    assert(width > 1)
-    for lf in layer_factories:
-        assert lf.get_width() == width
-    num_trees = layer_factories[0].get_num_trees()
-    for lf in layer_factories[1:]:
-        assert num_trees == lf.get_num_trees()
-    v = _build_forest(tf.constant(1.0, dtype=inps[0].dtype),
-                      width, depth, inps, layer_factories)
-    return tf.stack(v, axis=2)
 
 
 # forest specific loss functions
 
 
+# TODO: move this somewhere...
 def forest_reg_loss(forest_output: tf.Tensor,
                     reg_strength: tf.Tensor):
     """Forest regularization loss
@@ -143,6 +37,7 @@ def forest_reg_loss(forest_output: tf.Tensor,
 
 
 class Forest(keras.layers.Layer):
+    # NOTE: depth of 0 = 1 layer ~ 0 indexed
 
     def __init__(self):
         super(Forest, self).__init__()
@@ -157,7 +52,7 @@ class Forest(keras.layers.Layer):
         return depth
 
     def build(self, input_shape):
-        # TODO: docstring
+        # TODO: docstring;
         # assumes shape = batch_size x num_tree x total_nodes x width
         # total_nodes = geometric series
         #   = sum_{k=0}^{n}r^k = (1 - r^{n+1}) / (1 - r)
@@ -196,10 +91,11 @@ class Forest(keras.layers.Layer):
         return res, next_ind
 
     def call(self, inputs):
-        """Get tree probabilities ~ softmaxed across states
+        """Get tree probabilities
+            > softmaxes across states
 
         Args:
-            inputs (tf.Tensor):
+            inputs (tf.Tensor): unnormalized
                 batch_size x num_tree x total_nodes x width
 
         Returns:
@@ -213,7 +109,47 @@ class Forest(keras.layers.Layer):
         return tf.stack(v, axis=-1)
 
 
-# TODO: make a linear forest layer
+class ForestLinear(keras.layers.Layer):
+    # Forest with linear features
+    # NOTE: depth of 0 = 1 layer ~ 0 indexed
+
+    def __init__(self, width: int = 0, depth: int = 0, num_tree: int = 0):
+        super(ForestLinear, self).__init__()
+        self.width = width
+        self.depth = depth
+        self.num_tree = num_tree
+        # (1 - r^{n+1}) / (1 - r)
+        num = 1 - self.width**(self.depth + 1)
+        self.total_nodes = int(num / (1 - self.width))
+        print(self.total_nodes)
+
+    def build(self, input_shape):
+        # TODO: how do multiple inputs get handled?
+        # target output shape: batch_size x num_tree x total_nodes x width
+        # input shapes: [batch_size x ...], ...
+        #   num_tree, total_nodes = parallel dims
+        self.lin_layers = [MultiDense([0, 1], self.width) for _ in input_shape]
+        self.forest = Forest()
+
+    def call(self, inputs: List[tf.Tensor]):
+        # input shapes: [batch_size x ...], ...
+        # TODO: docstring
+
+        # eval each input indepdendenly
+        v = []
+        for i, inp in enumerate(inputs):
+            # reshape to batch_size x num_tree x total_nodes x ...
+            inp_shape = tf.shape(inp)
+            new_shape = tf.concat([inp_shape[:1], tf.ones([2], dtype=inp_shape.dtype), inp_shape[1:]], axis=0)
+            inp = tf.reshape(inp, new_shape)
+            tile_shape = tf.concat([tf.ones([1], inp_shape.dtype),
+                                    tf.constant([self.num_tree, self.total_nodes], inp_shape.dtype),
+                                    tf.ones(tf.shape(inp_shape[1:]), inp_shape.dtype)],
+                                   axis=0)
+            inp = tf.tile(inp, tile_shape)
+            v.append(self.lin_layers[i](inp))
+        return self.forest(tf.math.add_n(v))
+
 
 if __name__ == "__main__":
     # test out layer
@@ -239,3 +175,11 @@ if __name__ == "__main__":
     vout = Forest()(v2)
     model = tf.keras.Model(inputs=v2, outputs=vout)
     model(v)
+
+    # testing forest linear
+    v1 = tf.ones([8, 3])
+    v2 = tf.ones([8, 6, 2])
+    Flin = ForestLinear(3, 2, 11)
+    vout = Flin([v1, v2])
+    print(tf.shape(vout))
+    print(tf.math.reduce_sum(vout, axis=-1))
