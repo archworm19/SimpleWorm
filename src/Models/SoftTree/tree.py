@@ -71,9 +71,24 @@ class Forest(keras.layers.Layer):
                      depth: int,
                      width: int,
                      inp_ind: int):
-        # TODO: docstring
-        # weight = batch_size x num_tree
-        # inp_tensor = batch_size x num_tree x total_nodes x width
+        """recursive helper function for forest eval
+
+        Args:
+            inp_tensor (tf.Tensor): batch_size x num_tree x total_nodes x width
+            weight (tf.Tensor): batch_size x num_tree
+            depth (int): tree depth
+            width (int): tree width
+            inp_ind (int): which node we are currently on
+                each recursive call updates this
+                thus, each recursive call is assigned
+                to one total node
+
+        Returns:
+            tf.Tensor:
+                batch_size x num_tree x output_states
+                output_states = width**depth
+                softmaxes across output states
+        """
         if depth == 0:
             return [weight], inp_ind
         res = []

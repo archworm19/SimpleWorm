@@ -2,7 +2,7 @@
 import tensorflow as tf
 from keras.backend import int_shape
 from Models.SoftTree.klayers import MultiDense
-from Models.SoftTree.tree import build_forest, StandardTreeLayerFactory
+from Models.SoftTree.tree import Forest, ForestLinear
 
 
 def test_multi_dense():
@@ -40,30 +40,73 @@ def test_multi_dense_parallel():
             assert(not tf.math.reduce_all(vout2_dynamic_mask == vout_dynamic_mask).numpy())
 
 
-def test_build():
-    for depth, width in zip([2, 3], [2, 3, 4]):
-        tfacts = [StandardTreeLayerFactory(width, 11),
-                  StandardTreeLayerFactory(width, 11)]
-        inp1 = tf.keras.Input(shape=(4, 10),
-                            dtype=tf.float32)
-        inp2 = tf.keras.Input(shape=(5),
-                            dtype=tf.float32)
-        x = build_forest(width, depth, [inp1, inp2],
-                         tfacts)
-        assert(int_shape(x) == (None, tfacts[0].get_num_trees(), width**depth))
+def test_forest():
+    # test out layer
+    # depth = 1, width = 2
+    batch_size = 8
+    d1 = 5
+    depth = 1  # implied
+    width = 2
+    total_nodes = 3
+    out_state = 4
+    v = tf.ones([batch_size, d1, total_nodes, width])
+    vout = Forest()(v)
+    assert tf.math.reduce_all(tf.shape(vout) == [batch_size, d1, out_state])
+    assert tf.math.reduce_all((tf.math.reduce_sum(vout, axis=-1) - 1) < 1e-3)
 
-
-def test_fnorm():
-    x = 10. * tf.ones([5, 3, 4])
-    depth = 2
+    # test with more complex size:
+    # depth = 2; width = 3
     width = 3
-    x = build_forest(width, depth, [x],
-                     [StandardTreeLayerFactory(width, 1)])
-    assert(tf.math.reduce_all(tf.math.abs(tf.math.reduce_sum(x, axis=-1) - 1.0) < .001))
+    total_nodes = 1 + 3 + 9
+    out_state = 27
+    v = tf.ones([batch_size, d1, total_nodes, width])
+    F = Forest()
+    vout = F(v)
+    assert tf.math.reduce_all(tf.shape(vout) == [batch_size, d1, out_state])
+    # super important test ~ tests that forest evaluates all inputs
+    _, next_ind = F._eval_forest(v, tf.constant(1.), 3, 3, 0)
+    assert next_ind == tf.shape(v)[2]
+
+    # what if I use a keras tensor:
+    v2 = tf.keras.Input((5, 1 + 3 + 9, 3))
+    vout = Forest()(v2)
+    model = tf.keras.Model(inputs=v2, outputs=vout)
+    model(v)
+
+def test_linforest():
+    # testing forest linear
+    batch_size = 8
+    width = 3
+    depth = 2
+    num_tree = 11
+    v1 = tf.ones([batch_size, 3])
+    v2 = tf.ones([batch_size, 6, 2])
+    Flin = ForestLinear(width, depth, num_tree)
+    vout = Flin([v1, v2])
+    assert tf.math.reduce_all(tf.shape(vout) == [batch_size, num_tree, width**(depth+1)])
+
+def test_forest_grad():
+    # let's look at forest gradients to make sure stuff looks ok
+    # TODO: think about how to do this test properly
+    batch_size = 8
+    width = 2
+    depth = 1
+    num_tree = 3
+    v1 = tf.ones([batch_size, 3])
+    v2 = tf.ones([batch_size, 5, 3])
+    Flin = ForestLinear(width, depth, num_tree)
+    with tf.GradientTape(persistent=True) as g:
+        y = Flin([v1, v2])
+    grad_eval = g.gradient(y, Flin.lin_layers[0].w)
+    print(grad_eval[0])
+    assert tf.math.reduce_min(tf.math.abs(grad_eval)).numpy() != 0
+    grad_eval = g.gradient(y, Flin.lin_layers[1].w)
+    assert tf.math.reduce_min(tf.math.abs(grad_eval)).numpy() != 0
 
 
 if __name__ == "__main__":
     test_multi_dense()
     test_multi_dense_parallel()
-    test_build()
-    test_fnorm()
+    test_forest()
+    test_linforest()
+    test_forest_grad()
