@@ -1,36 +1,32 @@
-"""Assembled keras model"""
+"""Combines Models and Losses ~ is this really necessary?
+    OR: should assembly be done here as well? probably"""
 import tensorflow as tf
 from typing import List
-from Models.SoftTree.tree import (build_forest, StandardTreeLayerFactory,
-                                  forest_reg_loss)
+from Models.SoftTree.tree import (ForestLinear, forest_reg_loss)
 from Models.SoftTree.klayers import MultiDense
 from Models.SoftTree.loss_funcs import binary_loss
 
 
-def build_parallel_binary_preds(inps: List[tf.keras.Input],
-                                num_tree: int,
-                                num_state: int):
-    # inps = batch_size x d1 x ...
-    # returns: logits ~ batch_size x num_tree x num_state
-    yz = []
-    for inpi in inps:
-        x = tf.expand_dims(inpi, 1)
-        x = tf.expand_dims(x, 1)
-        x = tf.repeat(x, num_tree, 1)
-        x = tf.repeat(x, num_state, 2)
-        yz.append(MultiDense([0, 1], 1)(x))
-    return tf.math.add_n(yz)[:, :, :, 0]
+def _expand_and_tile(v: tf.Tensor,
+                     expand_dim: int,
+                     num_tile: int):
+    v_shape = tf.shape(v)
+    base_tile = tf.ones(tf.shape(v_shape), dtype=v_shape.dtype)
+    v2_tile = tf.concat([base_tile[:expand_dim],
+                         tf.constant([num_tile], dtype=v_shape.dtype),
+                         base_tile[expand_dim:]], axis=0)
+    v2 = tf.expand_dims(v, expand_dim)
+    return tf.tile(v2, v2_tile)
 
 
-# TODO: what about regularization penalty???
-def build_fweighted_linear_pred(inps: List[tf.Tensor],
-                                target: tf.Tensor,
-                                sample_mask: tf.Tensor,
-                                forest_reg_penalty: tf.Tensor,
-                                num_tree: int,
-                                depth: int,
-                                width: int,
-                                x2: tf.Tensor = None):
+def build_linear_binary_forest(inps: List[tf.Tensor],
+                               target: tf.Tensor,
+                               sample_mask: tf.Tensor,
+                               forest_reg_penalty: tf.Tensor,
+                               num_tree: int,
+                               depth: int,
+                               width: int,
+                               x2: tf.Tensor = None):
     """forest weighted linear predictor
     NOTE: boosting is done in logit space while averaging
         is done in probability space
@@ -58,35 +54,61 @@ def build_fweighted_linear_pred(inps: List[tf.Tensor],
             shape = batch_size
 
     Returns:
-        Dict[str, tf.Tensor]: named model outputs --> package into keras model
+        useful outputs
     """
-    layer_factories = [StandardTreeLayerFactory(width, num_tree) for _ in inps]
+    num_state = int(width**(depth+1))
     # --> batch_size x num_tree x num_state
-    states = build_forest(width, depth, inps, layer_factories)
-    # build parallel predictors:
-    preds = build_parallel_binary_preds(inps, num_tree, width**depth)
-
-    # if x2 supplied (as logits) --> add to preds (BOOST)
+    x_states = ForestLinear(width, depth, num_tree)(inps)
+    all_pred = []
+    for v in inps:
+        # v transformation
+        # --> batch_size x num_state x ...
+        v = _expand_and_tile(v, 1, num_state)
+        # --> batch_size x num_tree x num_state x ...
+        v = _expand_and_tile(v, 1, num_tree)
+        # --> batch_size x num_tree x num_state x 1 (cuz binary)
+        all_pred.append(MultiDense([0, 1], 1)(v))
+    # --> batch_size x num_tree x num_state
+    x_pred = tf.add_n(all_pred)[:, :, :, 0]
+    # loss: fit each tree and each state individually:
     if x2 is not None:
-        preds = preds + tf.reshape(x2, [-1, 1, 1])
+        # BOOST ~ in logit space
+        y_pred_logit_parallel = tf.reshape(x2, [-1, 1, 1]) + x_pred
+    else:
+        y_pred_logit_parallel = x_pred
+    bin_loss = binary_loss(y_pred_logit_parallel, target,
+                           x_states * tf.expand_dims(sample_mask, 2))
+    # mean prediction: batch_size
+    # average ~ in probability space
+    # reduce sum across states
+    ave_pred_tree = tf.math.reduce_sum(x_states * tf.expand_dims(sample_mask, 2) *
+                                       tf.math.sigmoid(y_pred_logit_parallel),
+                                       axis=2)
+    ave_pred = tf.math.reduce_mean(ave_pred_tree, axis=1)
 
-    # parallel loss
-    # > loss computed for each tree separately
-    parallel_loss = binary_loss(preds, tf.reshape(target, [-1, 1, 1]),
-                                states * tf.expand_dims(sample_mask, 2))
-    red_parallel_loss = tf.math.reduce_mean(tf.math.reduce_sum(parallel_loss, axis=2))
-    f_loss = forest_reg_loss(states, forest_reg_penalty)
+    print("TESTING: shape")
+    print(tf.shape(x_pred))
+    print(tf.shape(y_pred_logit_parallel))
+    print(tf.shape(ave_pred_tree))
+    print(tf.shape(ave_pred))
 
-    # Taverage prediction (RANDOM FOREST)
-    # NOTE: no mask
-    # > weighted sum across states > average across trees
-    prob_preds = tf.math.sigmoid(preds)
-    w_ave = tf.math.reduce_sum(states * prob_preds, axis=2)
-    pred_mu = tf.math.reduce_mean(w_ave, axis=1)
+    return bin_loss, ave_pred, y_pred_logit_parallel
 
-    # reduce sum error across states --> average across trees and batch
-    # ... cuz scaled by vector that is normalized across states
-    return {"loss": red_parallel_loss + f_loss,
-            "logit_predictions": preds,
-            "predictions": prob_preds,
-            "average_predictions": pred_mu}
+
+if __name__ == "__main__":
+    batch_size = 12
+    num_tree = 8
+    depth = 1
+    width = 2
+    inps = [tf.ones([batch_size, 5, 3])]
+    target = tf.ones(batch_size)
+    sample_mask = tf.ones([batch_size, num_tree])
+    forest_reg_penalty = 0.0
+    build_linear_binary_forest(inps,
+                               target,
+                               sample_mask,
+                               forest_reg_penalty,
+                               num_tree,
+                               depth,
+                               width,
+                               x2=None)

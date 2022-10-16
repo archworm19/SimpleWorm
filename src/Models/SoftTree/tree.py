@@ -9,7 +9,6 @@ from Models.SoftTree.klayers import MultiDense
 # forest specific loss functions
 
 
-# TODO: move this somewhere...
 def forest_reg_loss(forest_output: tf.Tensor,
                     reg_strength: tf.Tensor):
     """Forest regularization loss
@@ -34,6 +33,9 @@ def forest_reg_loss(forest_output: tf.Tensor,
     rs = tf.expand_dims(reg_strength, 1)
     # average across trees and batches
     return tf.math.reduce_mean(negent * tf.stop_gradient(rs))
+
+
+# Forest Layers
 
 
 class Forest(keras.layers.Layer):
