@@ -86,22 +86,42 @@ def test_linforest():
     assert tf.math.reduce_all(tf.shape(vout) == [batch_size, num_tree, width**(depth+1)])
 
 def test_forest_grad():
-    # let's look at forest gradients to make sure stuff looks ok
-    # TODO: think about how to do this test properly
+    # testing that all forest weights have impact on output
+    # --> differentiate reduced output by weights
+    # == should be non-zero
     batch_size = 8
     width = 2
     depth = 1
-    num_tree = 3
-    v1 = tf.ones([batch_size, 3])
-    v2 = tf.ones([batch_size, 5, 3])
+    num_tree = 5
+    tf.random.set_seed(42)
+    v1 = tf.random.uniform([batch_size, 4])
+    v2 = tf.random.uniform([batch_size, 5])
     Flin = ForestLinear(width, depth, num_tree)
     with tf.GradientTape(persistent=True) as g:
-        y = Flin([v1, v2])
+        y_full = Flin([v1, v2])
+        y = tf.math.reduce_mean(y_full)
+    print(y_full)
     grad_eval = g.gradient(y, Flin.lin_layers[0].w)
-    print(grad_eval[0])
     assert tf.math.reduce_min(tf.math.abs(grad_eval)).numpy() != 0
     grad_eval = g.gradient(y, Flin.lin_layers[1].w)
     assert tf.math.reduce_min(tf.math.abs(grad_eval)).numpy() != 0
+
+    # more specific gradient testing
+    # > diff each state individually
+    # ... some weights should have no impact on some states
+    out_states = [0, 1, 2, 3]
+    # internal states with no effect on given out state
+    nodrives = [2, 2, 1, 1]  # top affects everyone
+    for out_state, no_state in zip(out_states, nodrives):
+        with tf.GradientTape() as g2:
+            y_full = Flin([v1, v2])
+            y = tf.math.reduce_mean(y_full[:, :, out_state])
+        grad_eval = g2.gradient(y, Flin.lin_layers[0].w)
+        v = tf.math.reduce_sum(tf.math.abs(grad_eval), axis=[0, 2, 3])
+        v_np = v.numpy()
+        assert v_np[no_state] == 0
+        v_np[no_state] = 1.
+        assert all([abs(vi) > 0 for vi in v_np])
 
 
 if __name__ == "__main__":

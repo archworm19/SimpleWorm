@@ -136,7 +136,6 @@ class ForestLinear(keras.layers.Layer):
         # (1 - r^{n+1}) / (1 - r)
         num = 1 - self.width**(self.depth + 1)
         self.total_nodes = int(num / (1 - self.width))
-        print(self.total_nodes)
 
     def build(self, input_shape):
         # TODO: how do multiple inputs get handled?
@@ -164,37 +163,3 @@ class ForestLinear(keras.layers.Layer):
             inp = tf.tile(inp, tile_shape)
             v.append(self.lin_layers[i](inp))
         return self.forest(tf.math.add_n(v))
-
-
-if __name__ == "__main__":
-    # test out layer
-    # depth = 1
-    v = tf.ones([8, 5, 3, 2])
-    vout = Forest()(v)
-    print(vout)
-    print(tf.math.reduce_sum(vout, axis=-1))
-    # test with more complex size:
-    # depth = 2; width = 3
-    v = tf.ones([8, 5, 1 + 3 + 9, 3])
-    F = Forest()
-    vout = F(v)
-    print(vout)
-    print(tf.math.reduce_sum(vout, axis=-1))
-    # super important test:
-    _, next_ind = F._eval_forest(v, tf.constant(1.), 3, 3, 0)
-    print(next_ind)
-    assert next_ind == tf.shape(v)[2]
-
-    # what if I use a keras tensor:
-    v2 = tf.keras.Input((5, 1 + 3 + 9, 3))
-    vout = Forest()(v2)
-    model = tf.keras.Model(inputs=v2, outputs=vout)
-    model(v)
-
-    # testing forest linear
-    v1 = tf.ones([8, 3])
-    v2 = tf.ones([8, 6, 2])
-    Flin = ForestLinear(3, 2, 11)
-    vout = Flin([v1, v2])
-    print(tf.shape(vout))
-    print(tf.math.reduce_sum(vout, axis=-1))
