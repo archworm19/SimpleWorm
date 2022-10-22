@@ -3,14 +3,18 @@ import tensorflow as tf
 import numpy as np
 from keras.backend import int_shape
 from Models.SoftTree.kmodel import CustomModel
-from Models.SoftTree.models import build_fweighted_linear_pred
+from Models.SoftTree.hybrid_models import LinearScalarForest
+from Models.SoftTree.tree import forest_reg_loss
+from Models.SoftTree.loss_funcs import binary_loss
 
 
-def test_fweighted_linear_pred():
-    # params:
+def test_linear_binary_forest():
+    # single forest ~ no boosting
     num_tree = 11
-    depth = 2
-    width = 3
+    depth = 1
+    width = 2
+    LSF = LinearScalarForest(num_tree, depth, width,
+                             transform_func=tf.math.sigmoid)
 
     inp0 = tf.keras.Input(shape=(10, 3), dtype=tf.float32,
                           name="A")
@@ -26,18 +30,14 @@ def test_fweighted_linear_pred():
     # TODO: test different types?... float allows for graded masking
     sample_mask = tf.keras.Input(shape=(num_tree,), dtype=tf.float32,
                                   name="sample_mask")
-    
-    outputs = build_fweighted_linear_pred([inp0, inp1],
-                                          target,
-                                          sample_mask,
-                                          fpen,
-                                          num_tree,
-                                          depth,
-                                          width,
-                                          x2=None)
-    assert int_shape(outputs["loss"]) == ()
-    assert int_shape(outputs["logit_predictions"]) == (None, 11, 9)
-    assert int_shape(outputs["average_predictions"]) == (None, )
+
+    # LSF eval:
+    y_pred, y_pred_ave = LSF([inp0, inp1])
+
+    # binary loss
+    loss = binary_loss(y_pred, target, sample_mask)
+
+    # TODO: left off here
 
     # fake dataset:
     d = {"A": np.concatenate([np.ones((50, 10, 3)),
@@ -60,6 +60,7 @@ def test_fweighted_linear_pred():
         assert (primary - off_primary).numpy() > 0
 
 
+"""
 def test_fweighted_linear_pred_XOR():
     # can it learn XOR pattern? yep
     # params:
@@ -115,8 +116,8 @@ def test_fweighted_linear_pred_XOR():
     assert len(one_vals) == len(non_one_vals)
     assert np.all(one_vals > 0.5)
     assert np.all(non_one_vals < 0.5)
+"""
 
 
 if __name__ == "__main__":
-    test_fweighted_linear_pred()
-    test_fweighted_linear_pred_XOR()
+    test_linear_binary_forest()

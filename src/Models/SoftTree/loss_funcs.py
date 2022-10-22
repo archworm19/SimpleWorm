@@ -7,7 +7,7 @@ import tensorflow as tf
 
 
 def binary_loss(predictions: tf.Tensor,
-                y: tf.sparse.SparseTensor,
+                y: tf.Tensor,
                 mask: tf.Tensor = None):
     """binary cross-entropy loss using sigmoid function
     p = exp(pred) / (exp(pred) + 1)
