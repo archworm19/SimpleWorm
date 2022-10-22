@@ -1,7 +1,7 @@
 """Hybrid Models
     > Combine >1 Models"""
 import tensorflow as tf
-import keras
+from tensorflow.keras.layers import Layer
 from typing import Callable, List
 from Models.SoftTree.klayers import MultiDense
 from Models.SoftTree.tree import ForestLinear
@@ -19,7 +19,7 @@ def _expand_and_tile(v: tf.Tensor,
     return tf.tile(v2, v2_tile)
 
 
-class LinearScalarForest(keras.layers.Layers):
+class LinearScalarForest(Layer):
     # Scalar = outputs a scalar for each batch, tree
 
     def __init__(self,
@@ -46,7 +46,7 @@ class LinearScalarForest(keras.layers.Layers):
         self.FL = ForestLinear(width, depth, num_tree)
 
     def build(self, input: List[tf.Tensor]):
-        self.LWs = [MultiDense([0, 1], 1) for _ in len(input)]
+        self.LWs = [MultiDense([0, 1], 1) for _ in range(len(input))]
 
     def call(self, input: List[tf.Tensor], x2: tf.Tensor = None):
         """
@@ -59,13 +59,14 @@ class LinearScalarForest(keras.layers.Layers):
             each input should be batch_size x d1 x ...
         x2 (tf.Tensor): boosting value = added to all trees
             in logit space
+            shape = batch_size
 
         Returns:
             tf.Tensor: parallel predictions in logit space
                 for each tree, output state combo
                 batch_size x num_tree x num_state
             tf.Tensor: tree/state averaged prediction
-                batch_size
+                shape = batch_size
         """
         # --> batch_size x num_tree x num_state
         x_states = self.FL(input)
@@ -94,9 +95,3 @@ class LinearScalarForest(keras.layers.Layers):
                                            axis=2)
         ave_pred = tf.math.reduce_mean(ave_pred_tree, axis=1)
         return y_pred_logit_parallel, ave_pred
-
-
-if __name__ == "__main__":
-    batch_size = 16
-    LSF = LinearScalarForest(11, 1, 2)
-    inps = [tf.ones([batch_size, 5, 3])]
