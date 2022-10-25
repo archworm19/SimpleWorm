@@ -65,7 +65,11 @@ class LinearScalarForest(Layer):
             tf.Tensor: parallel predictions in logit space
                 for each tree, output state combo
                 batch_size x num_tree x num_state
+            tf.Tensor: prediction weight for each state
+                for each tree
+                batch_size x num_tree x num_state
             tf.Tensor: tree/state averaged prediction
+                already factors in prediction weights
                 shape = batch_size
         """
         # --> batch_size x num_tree x num_state
@@ -94,4 +98,4 @@ class LinearScalarForest(Layer):
                                            self.transform_func(y_pred_logit_parallel),
                                            axis=2)
         ave_pred = tf.math.reduce_mean(ave_pred_tree, axis=1)
-        return y_pred_logit_parallel, ave_pred
+        return y_pred_logit_parallel, x_states, ave_pred
