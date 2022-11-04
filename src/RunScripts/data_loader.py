@@ -3,7 +3,8 @@ from typing import List
 import os
 import copy
 import numpy as np
-import utils
+import tensorflow as tf
+import RunScripts.utils as utils
 
 
 def _make_2d(ar: np.ndarray):
@@ -237,10 +238,11 @@ def load_all_data():
         base_id_ar = np.array(id_dat[i])
         all_ids.append(_make_id_data(cell_clusts[i], base_id_ar, tmax))
 
-    # ensure we don't have any extra data:
+    # ensure we don't have any redundent data
     dmat = utils.get_all_array_dists(zim_op50 + npal_op50 + nostim)
     pass_inds = _similarity_filter(dmat)
     print(len(pass_inds))
+    print(len(dmat))
 
     # select passing indices:
     cell_clusts = _select_subsets(cell_clusts, pass_inds)
@@ -252,33 +254,37 @@ def load_all_data():
     return cell_clusts, all_ids, [zim_op50_cells, npal_op50_cells, nostim_cells], ["zim", "npal", "nostim"]
 
 
-if __name__ == '__main__':
-    from utils import build_file_set
-    cc, ids, cellz, set_names = load_all_data()
-    print(cellz)
-    import pylab as plt
-    for k, v in enumerate(cc):
-        print('\n ' + str(k))
-        for vi in v:
-            print(np.shape(vi))
-            plt.figure()
-            plt.plot(vi[:,0])
-            plt.plot(vi[:,4])
-            plt.plot(vi[:,5])
-            plt.plot(vi[:,6])
-            plt.show()
-    
-    # testing file pkging
-    for set_clusts, set_ids, set_name in zip(cc, ids, set_names):
-        t0_ars = [np.arange(len(sii)) for sii in set_ids]
-        file_set = build_file_set(set_clusts, set_ids, t0_ars, set_name)
+def get_datasets():
+    # return each type as a separate dataset
+    # fields: 1. cell_clusters (T x num_clust matrix), 2. anml_id (vector), 3. set_name (str)
+    # NOTE: datasets are NOT batched
+    cell_clusts, idz, _, set_names = load_all_data()
+    f_cell_clusts, f_idz, f_set_names = [], [], []
+    # iter thru datasets:
+    dsets = []
+    for cell_clusts_i, idz_i, set_name_i in zip(cell_clusts,
+                                                idz,
+                                                set_names):
+        # concatenate the cell clusters:
+        cc_cat = np.concatenate(cell_clusts_i, axis=0)
+        T = np.shape(cc_cat)[0]
+        # concatenate ids:
+        cc_ids = np.concatenate(idz_i, axis=0)
+        # tile set name for each sample:
+        tile_set_name = np.array([set_name_i] * T)
 
-        """
-        # TESTING: load the file:
-        filez = file_reps.get_files(file_set)
-        t_dat, id_dat, t0_dat = file_reps.open_file(filez[0])
-        print(t_dat[100:120,:])
-        print(id_dat[100:120])
-        print(t0_dat[100:120])
-        input('cont?')
-        """
+        # package into dataset:
+        d = {"cell_clusters": tf.constant(cc_cat),
+             "anml_id": tf.constant(cc_ids),
+             "set_name": tf.constant(tile_set_name)}
+        dsets.append(tf.data.Dataset.from_tensor_slices(d))
+    return dsets
+
+
+if __name__ == '__main__':
+    dset = get_datasets()
+    for d in dset:
+        for v in d:
+            print(v)
+            input("cont?")
+            break
