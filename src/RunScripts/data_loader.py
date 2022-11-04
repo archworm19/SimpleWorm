@@ -256,7 +256,10 @@ def load_all_data():
 
 def get_datasets():
     # return each type as a separate dataset
-    # fields: 1. cell_clusters (T x num_clust matrix), 2. anml_id (vector), 3. set_name (str)
+    # fields: 1. cell_clusters (T x num_clust matrix),
+    #         2. normalized time = t
+    #         3. anml_id (vector)
+    #         4. set_name (str)
     # NOTE: datasets are NOT batched
     cell_clusts, idz, _, set_names = load_all_data()
     f_cell_clusts, f_idz, f_set_names = [], [], []
@@ -272,10 +275,10 @@ def get_datasets():
         cc_ids = np.concatenate(idz_i, axis=0)
         # tile set name for each sample:
         tile_set_name = np.array([set_name_i] * T)
-
         # package into dataset:
         d = {"cell_clusters": tf.constant(cc_cat),
-             "anml_id": tf.constant(cc_ids),
+             "t": tf.constant(cc_ids[:, 0]),
+             "anml_id": tf.constant(cc_ids[:, 1:]),
              "set_name": tf.constant(tile_set_name)}
         dsets.append(tf.data.Dataset.from_tensor_slices(d))
     return dsets
