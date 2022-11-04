@@ -1,5 +1,6 @@
 """Useful tensorflow Dataset operations"""
 import tensorflow as tf
+from tensorflow.keras.layers import Hashing
 
 
 def set_nans_to_val(dset: tf.data.Dataset, field_name: str, val: float):
@@ -26,7 +27,29 @@ def set_nans_to_val(dset: tf.data.Dataset, field_name: str, val: float):
               tf.scatter_nd(nan_inds, update_vals, ret_shape))
         x2[field_name] = v2
         return x2
-    return dset.map(lambda x: set_func(x))
+    return dset.map(set_func)
+
+
+def sample_field_conditional(dset: tf.data.Dataset, field_name: str, num_bins: int,
+                             salt: int = 42):
+    """sample from dataset
+    where sampling is conditioned on the value in specified field
+    Ex: target field as 2 values: A, B
+    > if A is selected for set --> all entries with value A will
+    be passed thru
+
+    Args:
+        dset (tf.data.Dataset): input dataset
+        field_name (str): target field name
+        num_bins (int): probability of selection = (1 / num_bins)
+        salt (int): acts as random seed
+    """
+    hash_layer = Hashing(num_bins, salt=salt)
+    def select_elem(x):
+        s = tf.strings.reduce_join(tf.strings.as_string(x[field_name]),
+                                   separator=",")
+        return tf.math.reduce_all(hash_layer(s) == 0)
+    return dset.filter(select_elem)
 
 
 if __name__ == "__main__":
@@ -42,3 +65,13 @@ if __name__ == "__main__":
     dset_nonan = set_nans_to_val(dset, "v1", 2.)
     for v in dset_nonan:
         print(v)
+
+    # test element selection:
+    # > dataset output should be constant for single salt
+    # > can differ across salts
+    for salt in [0, 10, 42]:
+        print('salt test')
+        for _ in range(2):
+            dset_filter = sample_field_conditional(dset, "v2", 2, salt)
+            for v in dset_filter:
+                print(v)
