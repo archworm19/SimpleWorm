@@ -52,7 +52,8 @@ def sample_field_conditional(dset: tf.data.Dataset, field_name: str, num_bins: i
     return dset.filter(select_elem)
 
 
-def split_by_value(dset: tf.data.Dataset, field_name: str, factor: float,
+def split_by_value(dset: tf.data.Dataset, field_name: str,
+                   factor: float, offset: float = 0.0,
                    bit_field_name: str = "BIT", salt: int = 42):
     """adds BIT field that indicates whether sample is selected or not
     NOTE: requires that target field be float type
@@ -61,12 +62,13 @@ def split_by_value(dset: tf.data.Dataset, field_name: str, factor: float,
         dset (tf.data.Dataset): dataset
         field_name (str): target field name
         factor (float):
-            eval_value = round(factor * reduce_sum(input_val))
+        offset (float):
+            eval_value = round(factor * (reduce_sum(input_val) + offset))
     """
     hash_layer = Hashing(2, salt=salt)
     def add_bit(x):
         x2 = {k: x[k] for k in x}
-        v = tf.math.round(factor * tf.math.reduce_sum(x[field_name]))
+        v = tf.math.round(factor * (offset + tf.math.reduce_sum(x[field_name])))
         s = tf.strings.as_string(v)
         x2[bit_field_name] = hash_layer(s)
         return x2
@@ -105,10 +107,9 @@ if __name__ == "__main__":
         dset_trade = split_by_value(dset, "v2", 1., salt=salt)
         for v in dset_trade:
             print(v)
-    # factor = 0.1 --> should always group together
-    # TODO: FAILURE at 0.1 (wrks at 0.0)
+    # factor = 0.1 + offset at 1. --> should always group together
     print("TRADEOFF GROUP")
-    for salt in [0, 10, 42]:
-        dset_trade = split_by_value(dset, "v2", 0.0, salt=salt)
+    for salt in [0, 10, 42, 100, 101, 102]:
+        dset_trade = split_by_value(dset, "v2", 0.1, offset=1., salt=salt)
         for v in dset_trade:
             print(v)
