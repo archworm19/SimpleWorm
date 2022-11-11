@@ -75,6 +75,50 @@ def split_by_value(dset: tf.data.Dataset, field_name: str,
     return dset.map(add_bit)
 
 
+# TODO: how to get overlapping windows?
+# Possible Tools
+# > group_by_window: groups windows of elements by key --> reduction
+# > zip: zip the dataset with itself...
+# > unbatch: splits element of dataset into multiple elements?
+# > window: "dataset of windows" ~ 
+# yeah... this --> then filter for within animal
+def get_anml_windows(dset: tf.data.Dataset, win_size: int,
+                     anml_id_field: str, shift: int = 1):
+    """transforms data into windowed format
+        where windows are only allowed within animals
+
+    Args:
+        dset (tf.data.Dataset): dataset. Must be in order!
+            Assumes: elements are dicts
+        win_size (int): window size
+        anml_id_field (str): field that identifies animals
+            NOTE: for now, assumes this field is numeric
+            ... uses diff under hood
+        shift (int): how far to step between windows
+            Ex: if 1 --> all windows will be 'shifted' one step
+    """
+    # window --> each element is k, v where v = dataset for given key
+    win_dset = dset.window(win_size, shift=shift,
+                           drop_remainder=True)
+
+    # flat each dict elem
+    # --> k, v where v = dataset with one element (batch combined)
+    def dict_batch(x):
+        # assumes x = k, v where v = dataset
+        x2 = {k: x[k].batch(win_size) for k in x}
+        # NOTE: zip transforms from dict of datasets
+        # to dataset with dict elements (KEY)
+        return tf.data.Dataset.zip(x2)
+    # flat_map flattens nested dataset to non-nested dataset
+    flat_dset = win_dset.flat_map(dict_batch)
+
+    # filter anml:
+    def anml_filter(x):
+        v = x[anml_id_field]
+        v_diff = v[1:] - v[:-1]
+        return tf.math.reduce_all(v_diff == 0)
+    return flat_dset.filter(anml_filter)
+
 
 if __name__ == "__main__":
     # TODO: move these to tests
@@ -113,3 +157,7 @@ if __name__ == "__main__":
         dset_trade = split_by_value(dset, "v2", 0.1, offset=1., salt=salt)
         for v in dset_trade:
             print(v)
+
+    # window testing:
+    # TODO: need better dataset for testing animal filter
+    get_anml_windows(dset, 2, "", shift=1)
