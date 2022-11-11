@@ -1,4 +1,7 @@
-"""Useful tensorflow Dataset operations"""
+"""Useful tensorflow Dataset operations
+    NOTE: all of these operations assume elements are dictionaries
+
+"""
 import tensorflow as tf
 from tensorflow.keras.layers import Hashing
 
@@ -75,13 +78,6 @@ def split_by_value(dset: tf.data.Dataset, field_name: str,
     return dset.map(add_bit)
 
 
-# TODO: how to get overlapping windows?
-# Possible Tools
-# > group_by_window: groups windows of elements by key --> reduction
-# > zip: zip the dataset with itself...
-# > unbatch: splits element of dataset into multiple elements?
-# > window: "dataset of windows" ~ 
-# yeah... this --> then filter for within animal
 def get_anml_windows(dset: tf.data.Dataset, win_size: int,
                      anml_id_field: str, shift: int = 1):
     """transforms data into windowed format
@@ -118,3 +114,12 @@ def get_anml_windows(dset: tf.data.Dataset, win_size: int,
         v_diff = v[1:] - v[:-1]
         return tf.math.reduce_all(v_diff == 0)
     return flat_dset.filter(anml_filter)
+
+
+def select_idx(dset: tf.data.Dataset, field_name: str, idx: int):
+    # select idx for 0th axis for a single field
+    def sel(x):
+        x2 = {k: x[k] for k in x if k != field_name}
+        x2[field_name] = x[field_name][idx]
+        return x2
+    return dset.map(sel)

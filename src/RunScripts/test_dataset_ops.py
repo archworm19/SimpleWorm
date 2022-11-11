@@ -2,7 +2,8 @@
 import tensorflow as tf
 import numpy as np
 from RunScripts.dataset_ops import (set_nans_to_val, sample_field_conditional,
-                                    split_by_value, get_anml_windows)
+                                    split_by_value, get_anml_windows,
+                                    select_idx)
 
 
 def _build_small_dataset():
@@ -85,12 +86,18 @@ def test_anml_windows():
         assert tf.math.reduce_all(v["anml"] == target_v2[i])
 
 
+def test_window_select():
+    dset = _build_anml_dataset()
+    dset_win = get_anml_windows(dset, 3, "anml", 1)
+    dset_fin = select_idx(dset_win, "v1", 1)
+    targz = [1, 2, 5]
+    for i, v in enumerate(dset_fin):
+        assert v["v1"].numpy() == targz[i]
+
+
 if __name__ == "__main__":
     test_nan_reset()
     test_field_cond_sample()
     test_split_by_value()
     test_anml_windows()
-
-    # window testing:
-    # TODO: need better dataset for testing animal filter
-    # get_anml_windows(dset, 2, "", shift=1)
+    test_window_select()
