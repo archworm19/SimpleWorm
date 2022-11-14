@@ -258,13 +258,14 @@ def get_datasets():
     # return each type as a separate dataset
     # fields: 1. cell_clusters (T x num_clust matrix),
     #         2. normalized time = t
-    #         3. anml_id (vector)
+    #         3. anml_spec (vector) ~ experiment specification
     #         4. set_name (str)
+    #         5. anml_id (int) ~ unique animal id
     # NOTE: datasets are NOT batched
     cell_clusts, idz, _, set_names = load_all_data()
-    f_cell_clusts, f_idz, f_set_names = [], [], []
     # iter thru datasets:
     dsets = []
+    uniq_anml_id = 0
     for cell_clusts_i, idz_i, set_name_i in zip(cell_clusts,
                                                 idz,
                                                 set_names):
@@ -275,11 +276,17 @@ def get_datasets():
         cc_ids = np.concatenate(idz_i, axis=0)
         # tile set name for each sample:
         tile_set_name = np.array([set_name_i] * T)
+        # tile animal id for each sample:
+        anml_idz = []
+        for i, cc in enumerate(cell_clusts_i):
+            anml_idz.extend([i + uniq_anml_id] * len(cc))
+        uniq_anml_id += len(cell_clusts_i)
         # package into dataset:
         d = {"cell_clusters": tf.constant(cc_cat),
              "t": tf.constant(cc_ids[:, 0]),
-             "anml_id": tf.constant(cc_ids[:, 1:]),
-             "set_name": tf.constant(tile_set_name)}
+             "anml_spec": tf.constant(cc_ids[:, 1:]),
+             "set_name": tf.constant(tile_set_name),
+             "anml_id": tf.constant(anml_idz)}
         dsets.append(tf.data.Dataset.from_tensor_slices(d))
     return dsets
 
@@ -291,3 +298,11 @@ if __name__ == '__main__':
             print(v)
             input("cont?")
             break
+
+    # how many anml ids?
+    max_id = 0
+    for d in dset:
+        for v in d:
+            if v["anml_id"].numpy() > max_id:
+                max_id = v["anml_id"].numpy()
+    print(max_id)

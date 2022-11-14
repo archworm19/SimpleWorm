@@ -34,6 +34,7 @@ def set_nans_to_val(dset: tf.data.Dataset, field_name: str, val: float):
 
 
 def sample_field_conditional(dset: tf.data.Dataset, field_name: str, num_bins: int,
+                             bit_field_name: str = "BIT",
                              salt: int = 42):
     """sample from dataset
     where sampling is conditioned on the value in specified field
@@ -45,14 +46,19 @@ def sample_field_conditional(dset: tf.data.Dataset, field_name: str, num_bins: i
         dset (tf.data.Dataset): input dataset
         field_name (str): target field name
         num_bins (int): probability of selection = (1 / num_bins)
+            --> probably bit field = false = 1 - (1 / num_bins)
+        bit_field_name (str): name of bit field ~ indicates whether
+            selected or not
         salt (int): acts as random seed
     """
     hash_layer = Hashing(num_bins, salt=salt)
     def select_elem(x):
+        x2 = {k: x[k] for k in x}
         s = tf.strings.reduce_join(tf.strings.as_string(x[field_name]),
                                    separator=",")
-        return tf.math.reduce_all(hash_layer(s) == 0)
-    return dset.filter(select_elem)
+        x2[bit_field_name] = tf.math.reduce_all(hash_layer(s) == 0)
+        return x2
+    return dset.map(select_elem)
 
 
 def split_by_value(dset: tf.data.Dataset, field_name: str,
